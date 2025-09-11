@@ -7,13 +7,11 @@ import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.interactive.GameObjects;
-import org.dreambot.api.methods.interactive.Players;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
-import org.dreambot.api.utilities.SleepUtil;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,6 +25,7 @@ public class RoguesDenScript extends AbstractScript {
     private final Tile START_TILE = new Tile(3047,4975,1);
     private Config config = new Config();
     private RoguesDenGUI gui;
+    private boolean ironman;
 
     @Override
     public void onStart() {
@@ -36,10 +35,18 @@ public class RoguesDenScript extends AbstractScript {
             ScriptManager.getScriptManager().stop();
             return;
         }
+        ironman = getClient().isIronMan();
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
         });
+
+        new Thread(() -> {
+            while (!guiDone.get()) {
+                Sleep.sleep(100);
+            }
+            prepareSupplies();
+        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -85,6 +92,27 @@ public class RoguesDenScript extends AbstractScript {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 5000);
         } else {
             Sleep.sleep(400,700);
+        }
+    }
+
+    private void prepareSupplies() {
+        if (getBank().openClosest()) {
+            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+
+            if (!ironman && !Inventory.contains("Coins")) {
+                getBank().withdrawAll("Coins");
+                Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+            } else if (ironman) {
+                log("Ironman account detected, skipping coin withdrawal.");
+            }
+
+            if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+                getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
+                Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+            }
+
+            getBank().close();
+            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
     }
 
