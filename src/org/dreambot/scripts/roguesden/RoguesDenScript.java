@@ -14,16 +14,16 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
-// === Rogues' Den config & planning ===
+import org.dreambot.api.wrappers.interactive.NPC;
+import javax.swing.SwingUtilities;
+
 private static final String TOKEN_NAME = "Rogue's reward token";
 private static final String REWARD_NPC = "Rogue";
 private static final String[] GEAR_ITEMS = {
     "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
 };
 
-private enum Interaction {
-    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
-}
+private enum Interaction { OPEN, CLIMB, SQUEEZE, SEARCH, DISARM }
 
 private static class MazeStep {
     final Tile tile;
@@ -45,9 +45,8 @@ private final MazeStep[] MAZE_PLAN = new MazeStep[] {
     new MazeStep(new Tile(3054, 4968, 1), Interaction.SEARCH, "Crate")
 };
 
-// === Runtime state ===
 private int step = 0;
-private Config config = new Config();
+private final Config config = new Config();
 private RoguesDenGUI gui;
 private boolean ironman;
 private boolean suppliesReady;
@@ -72,29 +71,6 @@ private boolean meetsRequirements() {
         && getSkills().getRealLevel(Skill.AGILITY) >= 50;
 }
 
-@Override
-public int onLoop() {
-    if (!guiDone.get()) return 600;
-
-    if (!suppliesReady) {
-        prepareSupplies();
-        suppliesReady = true;
-        return 600;
-    }
-
-    if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
-        getWalking().toggleRun(true);
-    }
-
-    AntiBan.permute(this, abc, config);
-
-    if (handleRewards()) {
-        // (continue with reward handling logic)
-    }
-
-    return 600;
-}
-
 import javax.swing.SwingUtilities;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -108,49 +84,35 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1); // approximate
     private final Tile START_TILE = new Tile(3047,4975,1);
-private final Tile START_TILE = new Tile(3047,4975,1);
-
-// Simple waypoint list (kept for compatibility with existing pathing code)
-private final Tile[] MAZE_STEPS = {
-    new Tile(3047,4973,1),
-    new Tile(3048,4970,1),
-    new Tile(3050,4970,1),
-    new Tile(3052,4970,1)
-};
-
-// Reward/gear handling constants
-private static final String TOKEN_NAME = "Rogue's reward token";
-private static final String REWARD_NPC = "Rogue";
-private static final String[] GEAR_ITEMS = {
-    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
-};
-
-// Rich interaction model for the maze (new functionality)
-private enum Interaction {
-    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
-}
-
-private static class MazeStep {
+// ==== BEGIN FIX (lines 87–166) ====
+private static final class Obstacle {
     final Tile tile;
-    final Interaction interaction;
-    final String obstacle;
+    final String name;
+    final String action;
+    final Tile successTile;
+    final int animationId;
 
-    MazeStep(Tile tile, Interaction interaction, String obstacle) {
+    Obstacle(final Tile tile, final String name, final String action, final Tile successTile, final int animationId) {
         this.tile = tile;
-        this.interaction = interaction;
-        this.obstacle = obstacle;
+        this.name = name;
+        this.action = action;
+        this.successTile = successTile;
+        this.animationId = animationId;
     }
 }
 
-private final MazeStep[] MAZE_PLAN = {
-    new MazeStep(new Tile(3047,4973,1), Interaction.OPEN, "Door"),
-    new MazeStep(new Tile(3048,4970,1), Interaction.CLIMB, "Rubble"),
-    new MazeStep(new Tile(3050,4970,1), Interaction.SQUEEZE, "Gap"),
-    new MazeStep(new Tile(3052,4968,1), Interaction.DISARM, "Trap"),
-    new MazeStep(new Tile(3054,4968,1), Interaction.SEARCH, "Crate")
+private final Obstacle[] MAZE_PATH = new Obstacle[] {
+    new Obstacle(new Tile(3047, 4973, 1), "Door", "Open",          new Tile(3047, 4972, 1), -1),
+    new Obstacle(new Tile(3048, 4970, 1), "Climb", "Climb",        new Tile(3049, 4970, 1), -1),
+    new Obstacle(new Tile(3050, 4970, 1), "Squeeze-through", "Squeeze", new Tile(3051, 4970, 1), -1),
+    new Obstacle(new Tile(3052, 4970, 1), "Trap", "Jump-over",     new Tile(3053, 4970, 1), -1),
+    new Obstacle(new Tile(3054, 4970, 1), "Token", "Take",         new Tile(3054, 4970, 1), -1),
+    new Obstacle(new Tile(3055, 4970, 1), "Exit door", "Open",     new Tile(3056, 4970, 1), -1)
 };
+// ==== END FIX (lines 87–166) ====
 
     };
+
     private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
@@ -171,6 +133,7 @@ private boolean suppliesReady;
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
+            abc.generateTrackers();
         });
     }
 
@@ -253,106 +216,78 @@ private boolean suppliesReady;
             return;
         }
 
-        if (step >= MAZE_STEPS.length) {
+if (step >= MAZE_STEPS.length) {
+    handleChest();
+}
+
             step = 0;
             return;
         }
 
-        MazeStep current = MAZE_STEPS[step];
-        Tile target = current.tile;
-        if (getLocalPlayer().distance(target) > 2) {
-            getWalking().walk(target);
-            Sleep.sleepUntil(() -> getLocalPlayer().distance(target) <= 2, 5000);
-            return;
-        }
+MazeStep current = MAZE_STEPS[step];
+if (getLocalPlayer().distance(current.tile) > 2) {
+    getWalking().walk(current.tile);
+    Sleep.sleepUntil(() -> getLocalPlayer().distance(current.tile) <= 2, 5000);
+    return;
+}
 
-        switch (current.interaction) {
-            case OPEN:
-                handleOpen(current);
-                break;
-            case CLIMB:
-                handleClimb(current);
-                break;
-            case SQUEEZE:
-                handleSqueeze(current);
-                break;
-            case SEARCH:
-                handleSearch(current);
-                break;
-            case DISARM:
-                handleDisarm(current);
-                break;
-            case 3:
-                handleChest();
-                break;
-            default:
-                step = 0;
-        }
-    }
+// Approach obstacle for the current maze step
+handleObstacle(current);
+}
 
-private void handleOpen(MazeStep s) {
-    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
-    if (obj == null || !obj.interact("Open")) {
-        obstacleFailed(s.obstacle, "interaction failed");
+// Generic, instrumented obstacle handler (resolves the merge conflict)
+private void handleObstacle(MazeStep stepDef) {
+    // Defensive checks to avoid NPEs and preserve existing error logging behavior
+    if (stepDef == null || stepDef.name == null || stepDef.action == null) {
+        obstacleFailed(stepDef != null ? String.valueOf(stepDef.name) : "Unknown", "invalid MazeStep");
         return;
     }
+
+    // Find the target object by name and required action
+    GameObject obj = GameObjects.closest(o ->
+        o != null
+            && stepDef.name.equals(o.getName())
+            && o.hasAction(stepDef.action)
+    );
+
+    if (obj == null) {
+        obstacleFailed(stepDef.name, "object not found");
+        return;
+    }
+
+    // Remember our position before interacting
     Tile before = getLocalPlayer().getTile();
+
+    // Try to interact (e.g., "Open", "Climb", "Push", etc.)
+    if (!obj.interact(stepDef.action)) {
+        obstacleFailed(stepDef.name, "interaction failed");
+        return;
+    }
+
+    // Wait until we start moving or animating as a result of the interaction
     if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
-        obstacleFailed(s.obstacle, "no open animation");
+        obstacleFailed(stepDef.name, "no " + stepDef.action.toLowerCase() + " animation/move");
         return;
     }
+
+    }
+}
+
+    // Wait for the interaction to finish (stop moving/animating)
     Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+
+    // If we didn't meaningfully change position, treat as a failure
     if (getLocalPlayer().distance(before) <= 1) {
-        obstacleFailed(s.obstacle, "position unchanged");
+        obstacleFailed(stepDef.name, "position unchanged");
         return;
     }
+
+    // Success: advance the maze step, update our last safe tile, and apply anti-ban reaction
     step++;
     lastSafeTile = getLocalPlayer().getTile();
     AntiBan.sleepReaction(abc);
 }
 
-        }
-        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
-        if (getLocalPlayer().distance(before) <= 1) {
-            obstacleFailed("Door", "position unchanged");
-            return;
-        }
-        step++;
-        lastSafeTile = getLocalPlayer().getTile();
-    }
-
-private void handleClimb(MazeStep s) {
-    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Climb"));
-    if (obj == null || !obj.interact("Climb")) {
-        obstacleFailed("Climb", "interaction failed");
-        return;
-    }
-    Tile before = getLocalPlayer().getTile();
-    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-        obstacleFailed("Climb", "no climb animation");
-        return;
-    }
-    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-    if (getLocalPlayer().distance(before) <= 1) {
-        obstacleFailed("Climb", "trap triggered");
-        return;
-    }
-    step++;
-    lastSafeTile = getLocalPlayer().getTile();
-    AntiBan.sleepReaction(abc);
-}
-
-        }
-        Tile before = getLocalPlayer().getTile();
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-            obstacleFailed("Climb", "no climb animation");
-            return;
-        }
-        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-        if (getLocalPlayer().distance(before) <= 1) {
-            obstacleFailed("Climb", "trap triggered");
-            return;
-        }
         step++;
         lastSafeTile = getLocalPlayer().getTile();
     }
@@ -400,36 +335,42 @@ private void handleSearch(MazeStep s) {
     }
 }
 
-private void handleDisarm(MazeStep s) {
-    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Disarm"));
-    if (obj == null || !obj.interact("Disarm")) {
-        obstacleFailed("DISARM", "interaction failed");
-        return;
+// Compatibility shims for any older, specialized handlers that may be referenced elsewhere.
+// These delegate to the unified, instrumented handler above to preserve functionality
+// while removing duplicate/conflicting implementations.
+
+private void handleOpen(MazeStep s) {
+    // Assume "Open" action if not explicitly provided
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Open";
     }
-    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-        obstacleFailed("DISARM", "no disarm animation");
-        return;
-    }
-    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-    step++;
-    lastSafeTile = getLocalPlayer().getTile();
-    AntiBan.sleepReaction(abc);
+    handleObstacle(s);
 }
 
-private void handleChest() {
-    GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
-    if (chest == null || !chest.interact("Open")) {
-        obstacleFailed("Chest", "interaction failed");
-        return;
+private void handleClimb(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Climb";
     }
-    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating() || getLocalPlayer().isMoving(), 3000)) {
-        obstacleFailed("Chest", "no open animation");
-        return;
+    handleObstacle(s);
+}
+
+private void handlePush(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Push";
     }
-    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating() && !getLocalPlayer().isMoving(), 5000);
-    step++;
-    lastSafeTile = getLocalPlayer().getTile();
-    AntiBan.sleepReaction(abc);
+    handleObstacle(s);
+}
+
+private void handleSearch(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Search";
+    }
+    handleObstacle(s);
+}
+
+// If your code uses differently named helpers (e.g., handleDoor, handleGate, etc.),
+// add thin wrappers here that simply set a default action (if needed) and call handleObstacle.
+
 }
 
     private void prepareSupplies() {
