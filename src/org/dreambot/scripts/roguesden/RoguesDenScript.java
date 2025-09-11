@@ -470,21 +470,60 @@ public class RoguesDenScript extends AbstractScript {
     private boolean prepareSupplies() {
         if (suppliesReady) return true;
 
-        boolean haveSetInInv = true;
+        boolean bankOpened = false;
+
+        // Ensure all gear pieces are in inventory
         for (String item : GEAR_ITEMS) {
-            if (!Inventory.contains(item)) { haveSetInInv = false; break; }
-        }
-        if (!haveSetInInv && !hasFullRogueSet()) {
-            log("Missing Rogue gear pieces and not all found in bank.");
-            return false;
+            if (!Inventory.contains(item)) {
+                if (!bankOpened) {
+                    if (!getBank().openClosest()) {
+                        log("Could not open bank to withdraw supplies.");
+                        return false;
+                    }
+                    Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+                    bankOpened = true;
+                }
+
+                if (getBank().contains(item)) {
+                    getBank().withdraw(item, 1);
+                    Sleep.sleepUntil(() -> Inventory.contains(item), 2000);
+                } else {
+                    log("Missing Rogue gear piece: " + item);
+                    if (bankOpened) {
+                        getBank().close();
+                        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+                    }
+                    return false;
+                }
+            }
         }
 
+        if (bankOpened) {
+            getBank().close();
+            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        }
+
+        // Equip each gear piece
+        for (String item : GEAR_ITEMS) {
+            Item gear = Inventory.get(item);
+            if (gear == null || !gear.interact("Wear")) {
+                log("Failed to equip " + item);
+                return false;
+            }
+            Sleep.sleepUntil(() -> !Inventory.contains(item), 2000);
+            if (Inventory.contains(item)) {
+                log("Could not confirm " + item + " equipped.");
+                return false;
+            }
+        }
+
+        // Handle stamina potion
         Item stamina = Inventory.get(i -> {
             String n = (i == null) ? null : i.getName();
             return n != null && n.contains("Stamina potion");
         });
 
-        boolean opened = false;
+        bankOpened = false;
         if (stamina == null) {
             if (!getBank().isOpen()) {
                 if (!getBank().openClosest()) {
@@ -492,7 +531,7 @@ public class RoguesDenScript extends AbstractScript {
                     return false;
                 }
                 Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-                opened = true;
+                bankOpened = true;
             }
 
             if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
@@ -506,7 +545,7 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
-        if (opened) {
+        if (bankOpened) {
             getBank().close();
             Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
