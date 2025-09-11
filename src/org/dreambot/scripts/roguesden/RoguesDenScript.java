@@ -14,16 +14,16 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
-// === Rogues' Den config & planning ===
+import org.dreambot.api.wrappers.interactive.NPC;
+import javax.swing.SwingUtilities;
+
 private static final String TOKEN_NAME = "Rogue's reward token";
 private static final String REWARD_NPC = "Rogue";
 private static final String[] GEAR_ITEMS = {
     "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
 };
 
-private enum Interaction {
-    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
-}
+private enum Interaction { OPEN, CLIMB, SQUEEZE, SEARCH, DISARM }
 
 private static class MazeStep {
     final Tile tile;
@@ -45,9 +45,8 @@ private final MazeStep[] MAZE_PLAN = new MazeStep[] {
     new MazeStep(new Tile(3054, 4968, 1), Interaction.SEARCH, "Crate")
 };
 
-// === Runtime state ===
 private int step = 0;
-private Config config = new Config();
+private final Config config = new Config();
 private RoguesDenGUI gui;
 private boolean ironman;
 private boolean suppliesReady;
@@ -70,29 +69,6 @@ public void onStart() {
 private boolean meetsRequirements() {
     return getSkills().getRealLevel(Skill.THIEVING) >= 50
         && getSkills().getRealLevel(Skill.AGILITY) >= 50;
-}
-
-@Override
-public int onLoop() {
-    if (!guiDone.get()) return 600;
-
-    if (!suppliesReady) {
-        prepareSupplies();
-        suppliesReady = true;
-        return 600;
-    }
-
-    if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
-        getWalking().toggleRun(true);
-    }
-
-    AntiBan.permute(this, abc, config);
-
-    if (handleRewards()) {
-        // (continue with reward handling logic)
-    }
-
-    return 600;
 }
 
 import javax.swing.SwingUtilities;
@@ -252,6 +228,7 @@ private final MazeStep[] MAZE_PLAN = {
         }
 
         if (step >= MAZE_STEPS.length) {
+            handleChest();
             step = 0;
             return;
         }
@@ -343,12 +320,80 @@ private void handleSearch(MazeStep s) {
     }
 }
 
-private void handleDisarm(MazeStep s) {
-    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
-    if (obj != null && obj.interact("Disarm")) {
-        Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000);
-        step++;
+/** Open the loot chest at the end of the maze and collect the token. */
+private boolean handleChest() {
+    GameObject chest = GameObjects.closest(g -> g != null && "Chest".equals(g.getName()));
+    if (chest == null) return false;
+
+    if (!chest.isOnScreen()) {
+        getWalking().walk(chest);
+        Sleep.sleepUntil(chest::isOnScreen, Calculations.random(600, 1200));
     }
+
+    if (chest.interact("Open")) {
+        Sleep.sleepUntil(
+            () -> Inventory.contains(TOKEN_NAME) || !chest.exists(),
+            Calculations.random(1500, 3000)
+        );
+        return true;
+    }
+    return false;
+}
+
+/** Trade Rogue's reward token(s) to the Rogue NPC to obtain equipment pieces. */
+private boolean cashInTokens() {
+    if (!Inventory.contains(TOKEN_NAME)) return false;
+
+    NPC rogue = NPCs.closest(n -> n != null && REWARD_NPC.equals(n.getName()));
+    if (rogue == null) return false;
+
+    if (!rogue.isOnScreen()) {
+        getWalking().walk(rogue);
+        Sleep.sleepUntil(rogue::isOnScreen, Calculations.random(600, 1200));
+    }
+
+    if (rogue.interact("Trade") || rogue.interact("Talk-to")) {
+        Sleep.sleepUntil(() -> getDialogues().inDialogue() || getWidgets().isOpen(),
+                         Calculations.random(1200, 2500));
+
+        // Lightweight dialogue handling to consume token(s) and claim gear
+        long end = System.currentTimeMillis() + Calculations.random(4000, 7000);
+        while (System.currentTimeMillis() < end
+                && (getDialogues().inDialogue() || getDialogues().canContinue())) {
+            if (getDialogues().canContinue()) {
+                getDialogues().spaceToContinue();
+                Sleep.sleep(200, 400);
+                continue;
+            }
+            if (getDialogues().chooseOption(opt -> {
+                String o = opt.toLowerCase();
+                return o.contains("token") || o.contains("equipment") || o.contains("rogue");
+            })) {
+                Sleep.sleep(300, 600);
+            } else {
+                break;
+            }
+        }
+
+        // Wait for token to be spent or a new gear piece to appear
+        Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME) || hasFullRogueSet(),
+                         Calculations.random(2000, 4000));
+        return true;
+    }
+    return false;
+}
+
+/** True if all rogue pieces are (now) in inventory. */
+private boolean hasFullRogueSet() {
+    int have = 0;
+    for (String item : GEAR_ITEMS) {
+        if (Inventory.contains(item)) {
+            have++;
+        }
+    }
+    return have == GEAR_ITEMS.length;
+}
+
 }
 
 private void prepareSupplies() {
