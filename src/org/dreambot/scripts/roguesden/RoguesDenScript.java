@@ -149,6 +149,7 @@ public class RoguesDenScript extends AbstractScript {
         if (door != null && door.interact("Open")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
@@ -157,6 +158,7 @@ public class RoguesDenScript extends AbstractScript {
         if (climb != null && climb.interact("Climb")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
@@ -165,6 +167,7 @@ public class RoguesDenScript extends AbstractScript {
         if (squeeze != null && squeeze.interact("Squeeze")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
