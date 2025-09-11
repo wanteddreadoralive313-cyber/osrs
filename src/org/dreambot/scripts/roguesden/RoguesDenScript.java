@@ -291,11 +291,78 @@ if (handleRewards()) {
             return;
         }
 
-        GameObject obj = GameObjects.closest(o ->
-            o != null &&
-            stepDef.name.equals(o.getName()) &&
-            o.hasAction(stepDef.action)
-        );
+private void handleChest() {
+    if (Inventory.isFull()) {
+        log("Inventory full, cannot loot reward chest.");
+        return;
+    }
+
+    GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
+    if (chest == null) {
+        log("Reward chest not found.");
+        return;
+    }
+
+    int before = Inventory.count(TOKEN_NAME);
+    if (!chest.interact("Open")) {
+        log("Failed to open reward chest.");
+        return;
+    }
+
+    if (Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) > before, 5000)) {
+        step = 0;
+        lastSafeTile = getLocalPlayer().getTile();
+    } else {
+        log("No token received from chest.");
+    }
+}
+
+// Generic, instrumented obstacle handler (merged)
+private void handleObstacle(MazeStep stepDef) {
+    // Defensive checks to avoid NPEs and preserve existing error logging behavior
+    if (stepDef == null || stepDef.name == null || stepDef.action == null) {
+        obstacleFailed(stepDef != null ? String.valueOf(stepDef.name) : "Unknown", "invalid MazeStep");
+        return;
+    }
+
+    GameObject obj = GameObjects.closest(o ->
+        o != null &&
+        stepDef.name.equals(o.getName()) &&
+        o.hasAction(stepDef.action)
+    );
+
+    if (obj == null) {
+        obstacleFailed(stepDef.name, "object not found");
+        return;
+    }
+
+    Tile before = getLocalPlayer().getTile();
+
+    if (!obj.interact(stepDef.action)) {
+        obstacleFailed(stepDef.name, "interaction failed");
+        return;
+    }
+
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed(stepDef.name, "no " + stepDef.action.toLowerCase() + " animation/move");
+        return;
+    }
+
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+
+    // Verify we actually moved/acted
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed(stepDef.name, "position unchanged");
+        return;
+    }
+
+    // Success: advance the maze step, update our last safe tile, reset failures, and apply anti-ban reaction
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
+    AntiBan.sleepReaction(abc);
+}
+
 
         if (obj == null) {
             obstacleFailed(stepDef.name, "object not found");
