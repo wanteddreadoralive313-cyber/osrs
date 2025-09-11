@@ -11,7 +11,7 @@ import org.dreambot.api.wrappers.interactive.GameObject;
 import java.awt.Point;
 
 public class AntiBan {
-    private static long nextBreak = System.currentTimeMillis() + Calculations.random(30 * 60_000, 60 * 60_000);
+    private static long nextBreak = -1;
     private static long breakEnd = -1;
 
     public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
@@ -19,12 +19,23 @@ public class AntiBan {
 
         // Break scheduler
         long now = System.currentTimeMillis();
+
+        if (nextBreak == -1) {
+            nextBreak = now + Calculations.random(
+                config.breakIntervalMin * 60_000L,
+                config.breakIntervalMax * 60_000L
+            );
+        }
+
         if (breakEnd > 0) {
             // We are currently on a break
             if (now >= breakEnd) {
                 Login.login();
                 breakEnd = -1;
-                nextBreak = now + Calculations.random(30 * 60_000, 60 * 60_000);
+                nextBreak = now + Calculations.random(
+                    config.breakIntervalMin * 60_000L,
+                    config.breakIntervalMax * 60_000L
+                );
             }
             return;
         }
@@ -32,7 +43,10 @@ public class AntiBan {
         if (now >= nextBreak) {
             script.log("Taking scheduled break...");
             script.getTabs().logout();
-            breakEnd = now + Calculations.random(60_000, 300_000);
+            breakEnd = now + Calculations.random(
+                config.breakLengthMin * 60_000L,
+                config.breakLengthMax * 60_000L
+            );
             return;
         }
 

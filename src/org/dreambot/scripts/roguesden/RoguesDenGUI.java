@@ -8,7 +8,7 @@ public class RoguesDenGUI extends JFrame {
 
     public RoguesDenGUI(RoguesDenScript.Config config, AtomicBoolean done) {
         setTitle("Rogues' Den Script");
-        setSize(280, 250);
+        setSize(280, 320);
         setLayout(new GridLayout(0, 1));
 
         // Common checkboxes
@@ -40,6 +40,23 @@ public class RoguesDenGUI extends JFrame {
         runRestorePanel.add(new JLabel("Run restore:"));
         runRestorePanel.add(runRestoreField);
 
+        // Break scheduling controls
+        JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        breakIntervalPanel.add(new JLabel("Break interval (min):"));
+        JTextField breakIntervalMin = new JTextField(String.valueOf(config.breakIntervalMin), 3);
+        JTextField breakIntervalMax = new JTextField(String.valueOf(config.breakIntervalMax), 3);
+        breakIntervalPanel.add(breakIntervalMin);
+        breakIntervalPanel.add(new JLabel("to"));
+        breakIntervalPanel.add(breakIntervalMax);
+
+        JPanel breakLengthPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        breakLengthPanel.add(new JLabel("Break length (min):"));
+        JTextField breakLengthMin = new JTextField(String.valueOf(config.breakLengthMin), 3);
+        JTextField breakLengthMax = new JTextField(String.valueOf(config.breakLengthMax), 3);
+        breakLengthPanel.add(breakLengthMin);
+        breakLengthPanel.add(new JLabel("to"));
+        breakLengthPanel.add(breakLengthMax);
+
         // Start button + merged validation
         JButton start = new JButton("Start");
         start.addActionListener(e -> {
@@ -52,6 +69,7 @@ public class RoguesDenGUI extends JFrame {
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
+            int bIntMin, bIntMax, bLenMin, bLenMax;
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -67,10 +85,14 @@ public class RoguesDenGUI extends JFrame {
             try {
                 threshold = Integer.parseInt(runThresholdField.getText().trim());
                 restore = Integer.parseInt(runRestoreField.getText().trim());
+                bIntMin = Integer.parseInt(breakIntervalMin.getText().trim());
+                bIntMax = Integer.parseInt(breakIntervalMax.getText().trim());
+                bLenMin = Integer.parseInt(breakLengthMin.getText().trim());
+                bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run threshold/restore must be integers.",
+                        "Run/break values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -97,12 +119,26 @@ public class RoguesDenGUI extends JFrame {
                 );
                 return;
             }
+            if (bIntMin < 0 || bIntMax < 0 || bIntMin > bIntMax ||
+                bLenMin < 0 || bLenMax < 0 || bLenMin > bLenMax) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Break ranges must be non-negative and 'min' must be ≤ 'max'.",
+                        "Invalid break settings",
+                        JOptionPane.ERROR_MESSAGE
+                );
+                return;
+            }
 
             // Commit
             config.idleMin = newIdleMin;
             config.idleMax = newIdleMax;
             config.runThreshold = threshold;
             config.runRestore = restore;
+            config.breakIntervalMin = bIntMin;
+            config.breakIntervalMax = bIntMax;
+            config.breakLengthMin = bLenMin;
+            config.breakLengthMax = bLenMax;
 
             done.set(true);
             setVisible(false);
@@ -117,6 +153,8 @@ public class RoguesDenGUI extends JFrame {
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);
+        add(breakIntervalPanel);
+        add(breakLengthPanel);
         add(start);
 
         setLocationRelativeTo(null);
