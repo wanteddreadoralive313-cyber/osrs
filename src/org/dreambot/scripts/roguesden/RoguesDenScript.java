@@ -64,6 +64,11 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
+
+        if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
+            getWalking().toggleRun(true);
+        }
+
         AntiBan.permute(this, abc, config);
 
         State state = getState();
