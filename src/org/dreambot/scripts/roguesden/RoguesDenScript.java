@@ -610,6 +610,19 @@ public class RoguesDenScript extends AbstractScript {
         return String.format("%02d:%02d:%02d", h, m, sec);
     }
 
+    // Methods below are package-private to facilitate unit testing
+    int getStep() {
+        return step;
+    }
+
+    int getMazeStepCount() {
+        return MAZE_STEPS.length;
+    }
+
+    void incrementStep() {
+        step++;
+    }
+
     static class Config {
         boolean useStamina = true;
         boolean antiban = true;
