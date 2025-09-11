@@ -622,18 +622,79 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     static class Config {
+        /**
+         * Whether to drink stamina potions to restore run energy.
+         * True enables potion usage, false avoids it.
+         */
         boolean useStamina = true;
+
+        /**
+         * Enables ABC2 anti-ban behavior such as reaction time tracking.
+         * True to enable, false to disable.
+         */
         boolean antiban = true;
+
+        /**
+         * Hover the next maze entity before interacting for anti-ban realism.
+         */
         boolean hoverEntities = true;
+
+        /**
+         * Perform occasional random right-clicks as an anti-ban measure.
+         */
         boolean randomRightClick = true;
+
+        /**
+         * Randomly pan the camera to mimic human behavior.
+         */
         boolean cameraPanning = true;
+
+        /**
+         * Minimum idle delay between actions in milliseconds.
+         * Must be non-negative and less than or equal to {@link #idleMax}.
+         */
         int idleMin = 200;
+
+        /**
+         * Maximum idle delay between actions in milliseconds.
+         * Must be greater than or equal to {@link #idleMin}.
+         */
         int idleMax = 600;
+
+        /**
+         * Run energy percentage below which the player should rest.
+         * Valid range: 0–100 and must be less than {@link #runRestore}.
+         */
         int runThreshold = 20;
+
+        /**
+         * Run energy percentage at which running is re-enabled.
+         * Valid range: 0–100 and must be greater than {@link #runThreshold}.
+         */
         int runRestore = 40;
+
+        /**
+         * Minimum minutes between extended breaks.
+         * Must be non-negative and less than or equal to {@link #breakIntervalMax}.
+         */
         int breakIntervalMin = 30; // minutes
+
+        /**
+         * Maximum minutes between extended breaks.
+         * Must be greater than or equal to {@link #breakIntervalMin}.
+         */
         int breakIntervalMax = 60; // minutes
+
+        /**
+         * Minimum length of each break in minutes.
+         * Must be non-negative and less than or equal to {@link #breakLengthMax}.
+         */
         int breakLengthMin = 1;    // minutes
+
+        /**
+         * Maximum length of each break in minutes.
+         * Must be greater than or equal to {@link #breakLengthMin}.
+         */
         int breakLengthMax = 5;    // minutes
     }
 }
