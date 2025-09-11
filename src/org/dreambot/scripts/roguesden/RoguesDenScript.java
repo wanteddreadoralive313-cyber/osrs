@@ -15,7 +15,89 @@ import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
-import org.dreambot.api.wrappers.items.Item;
+// --- merged, conflict-free section ---
+
+import javax.swing.SwingUtilities;
+import java.util.ArrayList;
+import java.util.List;
+import org.dreambot.api.wrappers.items.Item; // from main branch
+
+private static final String TOKEN_NAME = "Rogue's reward token";
+private static final String REWARD_NPC = "Rogue";
+private static final String[] GEAR_ITEMS = {
+    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+};
+
+// Optional enum for readability when defining steps
+private enum Interaction { OPEN, CLIMB, SQUEEZE, SEARCH, DISARM }
+
+// Unified MazeStep definition compatible with the rest of the codebase
+private static class MazeStep {
+    final org.dreambot.api.methods.map.Tile tile;
+    final String name;   // target object name (e.g., "Door", "Gap")
+    final String action; // interaction action (e.g., "Open", "Climb", "Squeeze-through", "Search", "Disarm")
+
+    MazeStep(org.dreambot.api.methods.map.Tile tile, String name, String action) {
+        this.tile = tile;
+        this.name = name;
+        this.action = action;
+    }
+
+    // Convenience constructor to support the Interaction enum style
+    MazeStep(org.dreambot.api.methods.map.Tile tile, Interaction interaction, String obstacle) {
+        this(tile, obstacle, toAction(interaction));
+    }
+
+    private static String toAction(Interaction i) {
+        switch (i) {
+            case OPEN:    return "Open";
+            case CLIMB:   return "Climb";
+            case SQUEEZE: return "Squeeze-through";
+            case SEARCH:  return "Search";
+            case DISARM:  return "Disarm";
+            default:      return "Use";
+        }
+    }
+}
+
+// Use MAZE_STEPS (expected elsewhere in the code). Also expose MAZE_PLAN as an alias for compatibility.
+private final MazeStep[] MAZE_STEPS = new MazeStep[] {
+    new MazeStep(new org.dreambot.api.methods.map.Tile(3047, 4973, 1), Interaction.OPEN,    "Door"),
+    new MazeStep(new org.dreambot.api.methods.map.Tile(3048, 4970, 1), Interaction.CLIMB,   "Rubble"),
+    new MazeStep(new org.dreambot.api.methods.map.Tile(3050, 4970, 1), Interaction.SQUEEZE, "Gap"),
+    new MazeStep(new org.dreambot.api.methods.map.Tile(3052, 4968, 1), Interaction.DISARM,  "Trap"),
+    new MazeStep(new org.dreambot.api.methods.map.Tile(3054, 4968, 1), Interaction.SEARCH,  "Crate")
+};
+private final MazeStep[] MAZE_PLAN = MAZE_STEPS; // alias: either name works
+
+private int step = 0;
+private final Config config = new Config();
+private RoguesDenGUI gui;
+private boolean ironman;
+private boolean suppliesReady;
+
+@Override
+public void onStart() {
+    log("Starting Rogues' Den script");
+    if (!meetsRequirements()) {
+        log("Account doesn't meet Rogues' Den requirements.");
+        ScriptManager.getScriptManager().stop();
+        return;
+    }
+    ironman = getClient().isIronMan();
+    SwingUtilities.invokeLater(() -> {
+        gui = new RoguesDenGUI(config, guiDone);
+        gui.setVisible(true);
+    });
+}
+
+private boolean meetsRequirements() {
+    return getSkills().getRealLevel(Skill.THIEVING) >= 50
+        && getSkills().getRealLevel(Skill.AGILITY) >= 50;
+}
+
+// --- end merged section ---
+
 
 import javax.swing.SwingUtilities;
 import java.util.Arrays;
@@ -326,6 +408,10 @@ private void obstacleFailed(String name, String reason) {
             if (npc != null && npc.interact("Claim")) {
                 boolean success = Sleep.sleepUntil(() -> Inventory.contains(i -> isRogueGear(i.getName())), 5000);
                 if (success) {
+                    if (hasFullRogueSet()) {
+                        log("Full rogue set obtained. Stopping script.");
+                        ScriptManager.getScriptManager().stop();
+                    }
                     return true;
                 } else {
                     log("No gear received, retrying...");
@@ -346,7 +432,96 @@ private void obstacleFailed(String name, String reason) {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
     }
 
-    private boolean prepareSupplies() {
+// --- merged, conflict-free section ---
+
+private boolean hasFullRogueSet() {
+    List<String> missing = new ArrayList<>();
+    for (String item : GEAR_ITEMS) {
+        if (!Inventory.contains(item)) {
+            missing.add(item);
+        }
+    }
+    if (missing.isEmpty()) {
+        return true;
+    }
+
+    boolean opened = false;
+    if (!getBank().isOpen()) {
+        if (!getBank().openClosest()) {
+            log("Could not open bank to verify rogue set.");
+            return false;
+        }
+        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+        opened = true;
+    }
+
+    boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
+
+    if (opened) {
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+
+    return allPresent;
+}
+
+/**
+ * Ensures required supplies are available. Returns true if we're good to proceed.
+ * Compatible with callers that previously ignored a void return.
+ */
+private boolean prepareSupplies() {
+    if (suppliesReady) return true;
+
+    // Ensure we have the full Rogue set either on us or available in bank
+    boolean haveSetInInv = true;
+    for (String item : GEAR_ITEMS) {
+        if (!Inventory.contains(item)) { haveSetInInv = false; break; }
+    }
+    if (!haveSetInInv && !hasFullRogueSet()) {
+        log("Missing Rogue gear pieces and not all found in bank.");
+        return false;
+    }
+
+    // Make sure we have at least one stamina potion for run energy management
+    Item stamina = Inventory.get(i -> {
+        String n = (i == null) ? null : i.getName();
+        return n != null && n.contains("Stamina potion");
+    });
+
+    boolean opened = false;
+    if (stamina == null) {
+        if (!getBank().isOpen()) {
+            if (!getBank().openClosest()) {
+                log("Could not open bank to withdraw supplies.");
+                return false;
+            }
+            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+            opened = true;
+        }
+
+        if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
+            // Withdraw one potion (any dose)
+            getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
+            Sleep.sleepUntil(() ->
+                Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion")),
+                2000
+            );
+        } else {
+            log("No stamina potions available in bank.");
+        }
+    }
+
+    if (opened) {
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+
+    suppliesReady = true;
+    return true;
+}
+
+// --- end merged section ---
+
         int attempts = 0;
         boolean success = false;
         try {
