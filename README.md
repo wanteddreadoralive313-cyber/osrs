@@ -23,3 +23,7 @@ Rogue's Den script for the DreamBot client.
 - DreamBot API (`org.dreambot:dreambot:3.0.0`, scope `provided`)
 - Java 8 or newer
 - DreamBot client installation to provide the API at runtime
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
