@@ -13,6 +13,7 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
+import org.dreambot.api.wrappers.items.Item;
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -122,8 +123,17 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleRest() {
         log("Waiting for run energy...");
-        if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
+        if (config.useStamina && Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Stamina potion");
+        })) {
+            Item stamina = Inventory.get(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
+            if (stamina != null) {
+                stamina.interact("Drink");
+            }
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
         } else {
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
