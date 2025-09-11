@@ -11,39 +11,30 @@ import org.dreambot.api.wrappers.interactive.GameObject;
 import java.awt.Point;
 
 public class AntiBan {
-// Antiban state (resolved from merge)
-private static boolean trackersGenerated = false;
-private static long nextBreak = System.currentTimeMillis() + Calculations.random(30 * 60_000, 60 * 60_000);
-private static long breakEnd = -1;
-
+    private static long nextBreak = System.currentTimeMillis() + Calculations.random(30 * 60_000, 60 * 60_000);
+    private static long breakEnd = -1;
 
     public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
         if (!config.antiban) return;
 
-// Ensure trackers are generated once per session
-if (!trackersGenerated) {
-    abc.generateTrackers();
-    trackersGenerated = true;
-}
+        // Break scheduler
+        long now = System.currentTimeMillis();
+        if (breakEnd > 0) {
+            // We are currently on a break
+            if (now >= breakEnd) {
+                Login.login();
+                breakEnd = -1;
+                nextBreak = now + Calculations.random(30 * 60_000, 60 * 60_000);
+            }
+            return;
+        }
 
-// Break scheduler
-long now = System.currentTimeMillis();
-if (breakEnd > 0) {
-    // We are currently on a break
-    if (now >= breakEnd) {
-        Login.login();
-        breakEnd = -1;
-        nextBreak = now + Calculations.random(30 * 60_000, 60 * 60_000);
-    }
-    return;
-}
-
-if (now >= nextBreak) {
-    script.log("Taking scheduled break...");
-    script.getTabs().logout();
-    breakEnd = now + Calculations.random(60_000, 300_000);
-    return;
-}
+        if (now >= nextBreak) {
+            script.log("Taking scheduled break...");
+            script.getTabs().logout();
+            breakEnd = now + Calculations.random(60_000, 300_000);
+            return;
+        }
 
 
         // Perform built-in timed actions
