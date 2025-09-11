@@ -99,32 +99,22 @@ public class RoguesDenGUI extends JFrame {
                 return;
             }
 
-            // Validate ranges
-            if (threshold < 0 || threshold > 100 || restore < 0 || restore > 100 || threshold >= restore) {
+            // Validate ranges using shared validator
+            String error = ConfigValidator.validate(
+                    newIdleMin,
+                    newIdleMax,
+                    threshold,
+                    restore,
+                    bIntMin,
+                    bIntMax,
+                    bLenMin,
+                    bLenMax
+            );
+            if (error != null) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run energy values must be between 0 and 100,\n" +
-                                "and 'Run threshold' must be less than 'Run restore'.",
-                        "Invalid run-energy settings",
-                        JOptionPane.ERROR_MESSAGE
-                );
-                return;
-            }
-            if (newIdleMin < 0 || newIdleMax < 0 || newIdleMin > newIdleMax) {
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Idle ms must be non-negative and 'min' must be ≤ 'max'.",
-                        "Invalid idle settings",
-                        JOptionPane.ERROR_MESSAGE
-                );
-                return;
-            }
-            if (bIntMin < 0 || bIntMax < 0 || bIntMin > bIntMax ||
-                bLenMin < 0 || bLenMax < 0 || bLenMin > bLenMax) {
-                JOptionPane.showMessageDialog(
-                        this,
-                        "Break ranges must be non-negative and 'min' must be ≤ 'max'.",
-                        "Invalid break settings",
+                        error,
+                        "Invalid configuration",
                         JOptionPane.ERROR_MESSAGE
                 );
                 return;
