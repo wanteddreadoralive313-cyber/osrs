@@ -28,16 +28,48 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1); // approximate
     private final Tile START_TILE = new Tile(3047,4975,1);
-    private final Tile[] MAZE_STEPS = {
-            new Tile(3047,4973,1), // first door
-            new Tile(3048,4970,1), // climb obstacle
-            new Tile(3050,4970,1), // squeeze obstacle
-            new Tile(3052,4970,1)  // reward chest
-    };
-    private static final String TOKEN_NAME = "Rogue's reward token";
-    private static final String REWARD_NPC = "Rogue";
-    private static final String[] GEAR_ITEMS = {
-            "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+private final Tile START_TILE = new Tile(3047,4975,1);
+
+// Simple waypoint list (kept for compatibility with existing pathing code)
+private final Tile[] MAZE_STEPS = {
+    new Tile(3047,4973,1),
+    new Tile(3048,4970,1),
+    new Tile(3050,4970,1),
+    new Tile(3052,4970,1)
+};
+
+// Reward/gear handling constants
+private static final String TOKEN_NAME = "Rogue's reward token";
+private static final String REWARD_NPC = "Rogue";
+private static final String[] GEAR_ITEMS = {
+    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+};
+
+// Rich interaction model for the maze (new functionality)
+private enum Interaction {
+    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
+}
+
+private static class MazeStep {
+    final Tile tile;
+    final Interaction interaction;
+    final String obstacle;
+
+    MazeStep(Tile tile, Interaction interaction, String obstacle) {
+        this.tile = tile;
+        this.interaction = interaction;
+        this.obstacle = obstacle;
+    }
+}
+
+private final MazeStep[] MAZE_PLAN = {
+    new MazeStep(new Tile(3047,4973,1), Interaction.OPEN, "Door"),
+    new MazeStep(new Tile(3048,4970,1), Interaction.CLIMB, "Rubble"),
+    new MazeStep(new Tile(3050,4970,1), Interaction.SQUEEZE, "Gap"),
+    new MazeStep(new Tile(3052,4968,1), Interaction.DISARM, "Trap"),
+    new MazeStep(new Tile(3054,4968,1), Interaction.SEARCH, "Crate")
+};
+
     };
     private int step = 0;
     private Config config = new Config();
@@ -135,22 +167,29 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        Tile target = MAZE_STEPS[step];
+        MazeStep current = MAZE_STEPS[step];
+        Tile target = current.tile;
         if (getLocalPlayer().distance(target) > 2) {
             getWalking().walk(target);
             Sleep.sleepUntil(() -> getLocalPlayer().distance(target) <= 2, 5000);
             return;
         }
 
-        switch (step) {
-            case 0:
-                handleDoor();
+        switch (current.interaction) {
+            case OPEN:
+                handleOpen(current);
                 break;
-            case 1:
-                handleClimb();
+            case CLIMB:
+                handleClimb(current);
                 break;
-            case 2:
-                handleSqueeze();
+            case SQUEEZE:
+                handleSqueeze(current);
+                break;
+            case SEARCH:
+                handleSearch(current);
+                break;
+            case DISARM:
+                handleDisarm(current);
                 break;
             case 3:
                 handleChest();
@@ -160,38 +199,79 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private void handleDoor() {
-        GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
-        if (door != null && door.interact("Open")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
-            step++;
-        }
-    }
-
-    private void handleClimb() {
-        GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
-        if (climb != null && climb.interact("Climb")) {
+    private void handleOpen(MazeStep s) {
+        GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+        if (obj != null && obj.interact("Open")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
         }
     }
 
-    private void handleSqueeze() {
-        GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
-        if (squeeze != null && squeeze.interact("Squeeze")) {
+    private void handleClimb(MazeStep s) {
+        GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+        if (obj != null && obj.interact("Climb")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
         }
     }
 
-    private void handleChest() {
-        int attempts = 0;
-        while (attempts < 3 && !Inventory.contains(TOKEN_NAME)) {
-            GameObject chest = GameObjects.closest(o -> o != null && o.getName() != null && o.getName().contains("Chest"));
-            if (chest != null && chest.interact("Search")) {
-                Sleep.sleepUntil(() -> Inventory.contains(TOKEN_NAME), 5000);
-            } else {
-                log("Failed to interact with reward chest.");
+    private void handleSqueeze(MazeStep s) {
+        GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+        if (obj != null && obj.interact("Squeeze")) {
+            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+            step++;
+        }
+    }
+
+private void handleChest() {
+    int attempts = 0;
+    while (attempts < 3 && !Inventory.contains(TOKEN_NAME)) {
+        GameObject chest = GameObjects.closest(o -> o != null && o.getName() != null && o.getName().contains("Chest"));
+        if (chest != null && chest.interact("Search")) {
+            // Wait until the token is in inventory or the player begins the search animation
+            Sleep.sleepUntil(() -> Inventory.contains(TOKEN_NAME) || getLocalPlayer().isAnimating(), 5000);
+        } else {
+            log("Failed to interact with reward chest.");
+        }
+        attempts++;
+        Sleep.sleep(300, 600);
+    }
+    if (Inventory.contains(TOKEN_NAME)) {
+        step++;
+    } else {
+        log("Failed to obtain token from chest after multiple attempts.");
+    }
+}
+
+private void handleSearch(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+    if (obj != null && obj.interact("Search")) {
+        Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000);
+        step++;
+    }
+}
+
+private void handleDisarm(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+    if (obj != null && obj.interact("Disarm")) {
+        Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000);
+        step++;
+    }
+}
+
+private void prepareSupplies() {
+    int attempts = 0;
+    try {
+        // Robustly open the nearest bank (up to 3 attempts)
+        while (attempts < 3 && !getBank().isOpen()) {
+            if (!getBank().openClosest()) {
+                log("Failed to open closest bank. Retrying...");
+                attempts++;
+                Sleep.sleep(600, 1200);
+                continue;
+            }
+            // Bank opened; proceed with supply logic below...
+
             }
             attempts++;
         }
