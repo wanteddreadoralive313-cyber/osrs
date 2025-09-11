@@ -7,12 +7,14 @@ import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.interactive.GameObjects;
+import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
+import org.dreambot.api.wrappers.interactive.NPC;
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -118,6 +120,7 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         if (step >= MAZE_STEPS.length) {
+            handleChest();
             step = 0;
             return;
         }
@@ -165,6 +168,54 @@ public class RoguesDenScript extends AbstractScript {
         if (squeeze != null && squeeze.interact("Squeeze")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+        }
+    }
+
+    private void handleChest() {
+        GameObject chest = GameObjects.closest(o -> o != null && o.getName() != null && o.getName().contains("Chest") && o.hasAction("Search"));
+        if (chest != null && chest.interact("Search")) {
+            Sleep.sleepUntil(() -> Inventory.contains(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Rogue");
+            }), 5000);
+            if (!Inventory.contains(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Rogue");
+            })) {
+                log("Failed to find tokens in reward chest.");
+                return;
+            }
+            handleRewardNPC();
+        }
+    }
+
+    private void handleRewardNPC() {
+        if (!Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Rogue");
+        })) {
+            log("No tokens available to purchase gear.");
+            return;
+        }
+
+        NPC reward = NPCs.closest(n -> n != null && n.getName() != null && n.getName().contains("Brian"));
+        if (reward != null && reward.interact("Talk-to")) {
+            Sleep.sleepUntil(() -> getDialogues().inDialogue(), 5000);
+            if (getDialogues().inDialogue()) {
+                getDialogues().spaceToContinue();
+                if (getDialogues().chooseOption("I'd like to buy rogue equipment")) {
+                    Sleep.sleep(600, 1200);
+                }
+            }
+            Sleep.sleep(600, 1200);
+            if (!Inventory.contains(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Rogue") && !n.contains("token");
+            })) {
+                log("Rogue gear not detected after purchase attempt.");
+            }
+        } else {
+            log("Unable to interact with reward NPC.");
         }
     }
 
