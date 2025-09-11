@@ -64,7 +64,7 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
-        AntiBan.permute(this, abc, config.antiban);
+        AntiBan.permute(this, abc, config);
 
         State state = getState();
         switch (state) {
@@ -201,6 +201,11 @@ private void prepareSupplies() {
     static class Config {
         boolean useStamina = true;
         boolean antiban = true;
+        boolean hoverEntities = true;
+        boolean randomRightClick = true;
+        boolean cameraPanning = true;
+        int idleMin = 200;
+        int idleMax = 600;
         int runThreshold = 20;
         int runRestore = 40;
     }
