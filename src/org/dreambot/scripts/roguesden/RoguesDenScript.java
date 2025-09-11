@@ -131,6 +131,7 @@ private final Obstacle[] MAZE_PATH = new Obstacle[] {
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
+            abc.generateTrackers();
         });
     }
 
