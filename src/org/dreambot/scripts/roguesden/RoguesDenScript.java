@@ -15,10 +15,12 @@ import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 // --- merged, conflict-free section ---
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.methods.magic.Normal;
 import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.List;
-import org.dreambot.api.wrappers.items.Item; // from main branch
+import org.dreambot.api.wrappers.items.Item;
+
 
 private static final String TOKEN_NAME = "Rogue's reward token";
 private static final String REWARD_NPC = "Rogue";
@@ -60,13 +62,14 @@ private static class MazeStep {
 
 // Use MAZE_STEPS (expected elsewhere in the code). Also expose MAZE_PLAN as an alias for compatibility.
 private final MazeStep[] MAZE_STEPS = new MazeStep[] {
-    new MazeStep(new org.dreambot.api.methods.map.Tile(3047, 4973, 1), Interaction.OPEN,    "Door"),
-    new MazeStep(new org.dreambot.api.methods.map.Tile(3048, 4970, 1), Interaction.CLIMB,   "Rubble"),
-    new MazeStep(new org.dreambot.api.methods.map.Tile(3050, 4970, 1), Interaction.SQUEEZE, "Gap"),
-    new MazeStep(new org.dreambot.api.methods.map.Tile(3052, 4968, 1), Interaction.DISARM,  "Trap"),
-    new MazeStep(new org.dreambot.api.methods.map.Tile(3054, 4968, 1), Interaction.SEARCH,  "Crate")
+new MazeStep(new org.dreambot.api.methods.map.Tile(3047, 4973, 1), Interaction.OPEN,    "Door"),
+new MazeStep(new org.dreambot.api.methods.map.Tile(3048, 4970, 1), Interaction.CLIMB,   "Rubble"),
+new MazeStep(new org.dreambot.api.methods.map.Tile(3050, 4970, 1), Interaction.SQUEEZE, "Gap"),
+new MazeStep(new org.dreambot.api.methods.map.Tile(3052, 4968, 1), Interaction.DISARM,  "Trap"),
+new MazeStep(new org.dreambot.api.methods.map.Tile(3054, 4968, 1), Interaction.SEARCH,  "Crate")
 };
 private final MazeStep[] MAZE_PLAN = MAZE_STEPS; // alias: either name works
+
 
 private int step = 0;
 private final Config config = new Config();
@@ -94,7 +97,6 @@ private boolean meetsRequirements() {
         && getSkills().getRealLevel(Skill.AGILITY) >= 50;
 }
 // --- end merged section ---
-
 
 // --- end merged section ---
 
@@ -227,9 +229,14 @@ if (handleRewards()) {
         State state = getState();
         switch (state) {
             case TRAVEL:
-                getWalking().walk(START_TILE);
-                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
+                // merged: prefer robust travel method, with fallback to direct walk
+                handleTravel();
+                if (!DEN_AREA.contains(getLocalPlayer())) {
+                    getWalking().walk(START_TILE);
+                    Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
+                }
                 return Calculations.random(300, 600);
+
             case REST:
                 handleRest();
                 return Calculations.random(600, 900);
@@ -252,6 +259,39 @@ if (handleRewards()) {
 
     private boolean needsRest() {
         return getWalking().getRunEnergy() < config.runThreshold;
+    }
+
+    private void handleTravel() {
+        if (DEN_AREA.contains(getLocalPlayer())) {
+            return;
+        }
+
+        int failures = 0;
+        while (!DEN_AREA.contains(getLocalPlayer())) {
+            // wait out any teleport animations
+            if (getLocalPlayer().isAnimating()) {
+                Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 15000);
+                continue;
+            }
+
+            // after several failed path attempts try teleporting
+            if (failures >= 3 && getMagic().canCast(Normal.HOME_TELEPORT)) {
+                log("Teleporting closer to the Rogues' Den...");
+                if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
+                    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 30000);
+                }
+                failures = 0;
+                continue;
+            }
+
+            if (!getWalking().walk(START_TILE)) {
+                failures++;
+                log("Failed to generate path to den (" + failures + ")");
+                Sleep.sleep(600, 900);
+            } else {
+                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()) || !getLocalPlayer().isMoving(), 15000);
+            }
+        }
     }
 
     private void handleRest() {
