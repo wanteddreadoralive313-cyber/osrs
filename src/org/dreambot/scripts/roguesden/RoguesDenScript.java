@@ -25,11 +25,43 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1); // approximate
     private final Tile START_TILE = new Tile(3047,4975,1);
-    private final Tile[] MAZE_STEPS = {
-            new Tile(3047,4973,1), // first door
-            new Tile(3048,4970,1), // climb obstacle
-            new Tile(3050,4970,1)  // squeeze obstacle
+
+    /**
+     * Represents a single obstacle step within the maze. successTile and animationId are used for
+     * validation. If either condition is met after interacting with the obstacle, the step is
+     * considered successful.
+     */
+    private static class Obstacle {
+        final Tile tile;
+        final String name;
+        final String action;
+        final Tile successTile;
+        final int animationId;
+
+        Obstacle(Tile tile, String name, String action, Tile successTile, int animationId) {
+            this.tile = tile;
+            this.name = name;
+            this.action = action;
+            this.successTile = successTile;
+            this.animationId = animationId;
+        }
+    }
+
+    /**
+     * Full obstacle path through the maze including token and exit sequences. The majority of the
+     * coordinates are placeholders and should be updated with the real maze layout.
+     */
+    private final Obstacle[] MAZE_PATH = {
+            new Obstacle(new Tile(3047,4973,1), "Door", "Open", new Tile(3047,4972,1), -1),
+            new Obstacle(new Tile(3048,4970,1), "Climb", "Climb", new Tile(3049,4970,1), -1),
+            new Obstacle(new Tile(3050,4970,1), "Squeeze-through", "Squeeze", new Tile(3051,4970,1), -1),
+            // --- Begin token path ---
+            new Obstacle(new Tile(3052,4970,1), "Trap", "Jump-over", new Tile(3053,4970,1), -1), // TODO actual data
+            new Obstacle(new Tile(3054,4970,1), "Token", "Take", new Tile(3054,4970,1), -1), // token pickup
+            // --- Begin exit path ---
+            new Obstacle(new Tile(3055,4970,1), "Exit door", "Open", new Tile(3056,4970,1), -1) // TODO actual data
     };
+
     private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
@@ -117,55 +149,43 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        if (step >= MAZE_STEPS.length) {
+        if (step >= MAZE_PATH.length) {
             step = 0;
             return;
         }
 
-        Tile target = MAZE_STEPS[step];
-        if (getLocalPlayer().distance(target) > 2) {
-            getWalking().walk(target);
-            Sleep.sleepUntil(() -> getLocalPlayer().distance(target) <= 2, 5000);
+        Obstacle obstacle = MAZE_PATH[step];
+        if (getLocalPlayer().distance(obstacle.tile) > 2) {
+            getWalking().walk(obstacle.tile);
+            Sleep.sleepUntil(() -> getLocalPlayer().distance(obstacle.tile) <= 2, 5000);
             return;
         }
 
-        switch (step) {
-            case 0:
-                handleDoor();
-                break;
-            case 1:
-                handleClimb();
-                break;
-            case 2:
-                handleSqueeze();
-                break;
-            default:
-                step = 0;
+        handleObstacle(obstacle);
+    }
+
+    private void handleObstacle(Obstacle obstacle) {
+        GameObject obj = GameObjects.closest(o -> o != null && obstacle.name.equals(o.getName()) && o.hasAction(obstacle.action));
+        if (obj != null && obj.interact(obstacle.action)) {
+            boolean success = Sleep.sleepUntil(() -> {
+                boolean pos = obstacle.successTile != null && getLocalPlayer().distance(obstacle.successTile) <= 1;
+                boolean anim = obstacle.animationId != -1 && getLocalPlayer().getAnimation() == obstacle.animationId;
+                return pos || anim;
+            }, 4000);
+
+            if (success) {
+                step++;
+            } else {
+                failObstacle(obstacle.name);
+            }
+        } else {
+            failObstacle(obstacle.name);
         }
     }
 
-    private void handleDoor() {
-        GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
-        if (door != null && door.interact("Open")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
-            step++;
-        }
-    }
-
-    private void handleClimb() {
-        GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
-        if (climb != null && climb.interact("Climb")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-            step++;
-        }
-    }
-
-    private void handleSqueeze() {
-        GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
-        if (squeeze != null && squeeze.interact("Squeeze")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-            step++;
-        }
+    private void failObstacle(String name) {
+        log("DEBUG: obstacle failed -> " + name);
+        step = 0;
     }
 
 private void recoverMaze() {
