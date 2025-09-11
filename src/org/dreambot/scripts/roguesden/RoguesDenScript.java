@@ -64,6 +64,11 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
+
+        if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
+            getWalking().toggleRun(true);
+        }
+
         AntiBan.permute(this, abc, config);
 
         State state = getState();
@@ -163,33 +168,78 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private void recoverMaze() {
-        log("Recovering maze...");
-        getWalking().walk(START_TILE);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
-        step = 0;
-    }
+private void recoverMaze() {
+    log("Recovering maze...");
+    getWalking().walk(START_TILE);
+    Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+    step = 0;
+}
 
-    private void prepareSupplies() {
-        if (getBank().openClosest()) {
+private void prepareSupplies() {
+    int attempts = 0;
+    try {
+        // Robustly open the nearest bank (up to 3 attempts)
+        while (attempts < 3 && !getBank().isOpen()) {
+            if (!getBank().openClosest()) {
+                log("Failed to open closest bank. Retrying...");
+                attempts++;
+                Sleep.sleep(600, 1200);
+                continue;
+            }
             Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+        }
 
-            if (!ironman && !Inventory.contains("Coins")) {
-                getBank().withdrawAll("Coins");
+        if (!getBank().isOpen()) {
+            log("Unable to open bank after multiple attempts. Aborting supply preparation.");
+            return;
+        }
+
+        // Coins (skip on ironman)
+        if (!ironman && !Inventory.contains("Coins")) {
+            if (getBank().withdrawAll("Coins")) {
                 Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
-            } else if (ironman) {
-                log("Ironman account detected, skipping coin withdrawal.");
+                if (!Inventory.contains("Coins")) {
+                    log("Failed to withdraw coins.");
+                }
+            } else {
+                log("Bank failed to withdraw coins.");
             }
+        } else if (ironman) {
+            log("Ironman account detected, skipping coin withdrawal.");
+        }
 
-            if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-                getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
-                Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+        // Stamina potions (if configured), with null-safe name checks
+        if (config.useStamina && !Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Stamina potion");
+        })) {
+            boolean withdrew = getBank().withdrawAll(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
+            if (withdrew) {
+                Sleep.sleepUntil(() -> Inventory.contains(i -> {
+                    String n = i.getName();
+                    return n != null && n.contains("Stamina potion");
+                }), 2000);
+                if (!Inventory.contains(i -> {
+                    String n = i.getName();
+                    return n != null && n.contains("Stamina potion");
+                })) {
+                    log("Failed to confirm stamina potions in inventory after withdrawal.");
+                }
+            } else {
+                log("Bank failed to withdraw stamina potions.");
             }
-
+        }
+    } finally {
+        // Always try to close the bank
+        if (getBank().isOpen()) {
             getBank().close();
             Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
     }
+}
 
     @Override
     public void onExit() {
