@@ -53,6 +53,7 @@ public class RoguesDenScript extends AbstractScript {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
+    private boolean suppliesReady;
 
     @Override
     public void onStart() {
@@ -67,13 +68,6 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
         });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            prepareSupplies();
-        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -83,6 +77,12 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
+
+        if (!suppliesReady) {
+            prepareSupplies();
+            suppliesReady = true;
+            return 600;
+        }
 
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
