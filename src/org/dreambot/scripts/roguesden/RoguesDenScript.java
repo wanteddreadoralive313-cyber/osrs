@@ -293,6 +293,7 @@ private final MazeStep[] MAZE_PLAN = {
         if (obj != null && obj.interact("Open")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
@@ -301,6 +302,7 @@ private final MazeStep[] MAZE_PLAN = {
         if (obj != null && obj.interact("Climb")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
@@ -309,6 +311,7 @@ private final MazeStep[] MAZE_PLAN = {
         if (obj != null && obj.interact("Squeeze")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
+            AntiBan.sleepReaction(abc);
         }
     }
 
