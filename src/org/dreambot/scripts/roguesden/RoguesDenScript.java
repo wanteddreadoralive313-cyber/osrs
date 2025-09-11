@@ -556,5 +556,9 @@ public class RoguesDenScript extends AbstractScript {
         int idleMax = 600;
         int runThreshold = 20;
         int runRestore = 40;
+        int breakIntervalMin = 30; // minutes
+        int breakIntervalMax = 60; // minutes
+        int breakLengthMin = 1;    // minutes
+        int breakLengthMax = 5;    // minutes
     }
 }
