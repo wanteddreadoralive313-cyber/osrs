@@ -50,5 +50,10 @@ public class AntiBan {
         if (config.idleMax > 0 && Calculations.random(0, 100) < 10) {
             Sleep.sleep(config.idleMin, config.idleMax);
         }
+
+        int reactionTime = abc.generateReactionTime();
+        script.log("Reaction time: " + reactionTime + "ms");
+        Sleep.sleep(reactionTime);
+        abc.generateTrackers();
     }
 }

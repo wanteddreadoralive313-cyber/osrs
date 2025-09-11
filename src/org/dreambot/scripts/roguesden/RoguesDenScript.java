@@ -47,6 +47,7 @@ public class RoguesDenScript extends AbstractScript {
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
+            abc.generateTrackers();
         });
 
         new Thread(() -> {
