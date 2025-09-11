@@ -3,7 +3,6 @@ package org.dreambot.scripts.roguesden;
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.interactive.GameObjects;
-import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
@@ -14,9 +13,8 @@ import org.dreambot.api.script.ScriptManifest;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
-import org.dreambot.api.wrappers.interactive.NPC;
 // --- merged, conflict-free section ---
-
+import org.dreambot.api.wrappers.interactive.NPC;
 import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.List;
@@ -95,12 +93,13 @@ private boolean meetsRequirements() {
     return getSkills().getRealLevel(Skill.THIEVING) >= 50
         && getSkills().getRealLevel(Skill.AGILITY) >= 50;
 }
+// --- end merged section ---
+
 
 // --- end merged section ---
 
 
 import javax.swing.SwingUtilities;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
@@ -117,19 +116,48 @@ public class RoguesDenScript extends AbstractScript {
         final String name;
         final String action;
 
-        MazeStep(Tile tile, String name, String action) {
-            this.tile = tile;
-            this.name = name;
-            this.action = action;
-        }
+// --- merged, conflict-free section ---
+private final ABCUtil abc = new ABCUtil();
+private final AtomicBoolean guiDone = new AtomicBoolean(false);
+private final Area DEN_AREA = new Area(3040, 4970, 3050, 4980, 1); // approximate
+private final Tile START_TILE = new Tile(3047, 4975, 1);
+
+/**
+ * Represents a single obstacle step within the maze.
+ * successTile/animationId are optional and may be unused by handlers.
+ */
+private static class MazeStep {
+    final Tile tile;
+    final String name;       // target object name (e.g., "Door", "Gap")
+    final String action;     // interaction action (e.g., "Open", "Climb")
+    final Tile successTile;  // optional: expected tile after success
+    final int animationId;   // optional: expected animation id during action
+
+    MazeStep(Tile tile, String name, String action) {
+        this(tile, name, action, null, -1);
     }
 
-    private final MazeStep[] MAZE_STEPS = new MazeStep[]{
-            new MazeStep(new Tile(3047, 4973, 1), "Door", "Open"),
-            new MazeStep(new Tile(3048, 4970, 1), "Rubble", "Climb"),
-            new MazeStep(new Tile(3050, 4970, 1), "Gap", "Squeeze-through"),
-            new MazeStep(new Tile(3052, 4968, 1), "Trap", "Disarm"),
-            new MazeStep(new Tile(3054, 4968, 1), "Crate", "Search")
+    MazeStep(Tile tile, String name, String action, Tile successTile, int animationId) {
+        this.tile = tile;
+        this.name = name;
+        this.action = action;
+        this.successTile = successTile;
+        this.animationId = animationId;
+    }
+}
+
+/**
+ * Obstacle path through the maze (names/actions match handlers elsewhere).
+ */
+private final MazeStep[] MAZE_STEPS = new MazeStep[] {
+    new MazeStep(new Tile(3047, 4973, 1), "Door",   "Open"),
+    new MazeStep(new Tile(3048, 4970, 1), "Rubble", "Climb"),
+    new MazeStep(new Tile(3050, 4970, 1), "Gap",    "Squeeze-through"),
+    new MazeStep(new Tile(3052, 4968, 1), "Trap",   "Disarm"),
+    new MazeStep(new Tile(3054, 4968, 1), "Crate",  "Search")
+};
+// --- end merged section ---
+
     };
 
     private final ABCUtil abc = new ABCUtil();
@@ -141,7 +169,6 @@ public class RoguesDenScript extends AbstractScript {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
-// --- merged, conflict-free section ---
 private static final int FAILURE_THRESHOLD = 3;
 
 private boolean suppliesReady;
@@ -149,7 +176,6 @@ private int failureCount = 0;
 private Tile lastSafeTile = START_TILE;
 
 private enum State { TRAVEL, MAZE, REST }
-// --- end merged section ---
 
 
     @Override
@@ -164,8 +190,14 @@ private enum State { TRAVEL, MAZE, REST }
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
-            abc.generateTrackers();
         });
+
+        new Thread(() -> {
+            while (!guiDone.get()) {
+                Sleep.sleep(100);
+            }
+            prepareSupplies();
+        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -177,10 +209,10 @@ private enum State { TRAVEL, MAZE, REST }
     public int onLoop() {
         if (!guiDone.get()) return 600;
 
-        if (!suppliesReady) {
-            suppliesReady = prepareSupplies();
-            return 600;
-        }
+if (!suppliesReady) {
+    suppliesReady = prepareSupplies();
+    return 600;
+}
 
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
@@ -188,9 +220,9 @@ private enum State { TRAVEL, MAZE, REST }
 
         AntiBan.permute(this, abc, config);
 
-        if (handleRewards()) {
-            return Calculations.random(600, 900);
-        }
+if (handleRewards()) {
+    return Calculations.random(600, 900);
+}
 
         State state = getState();
         switch (state) {
@@ -224,17 +256,8 @@ private enum State { TRAVEL, MAZE, REST }
 
     private void handleRest() {
         log("Waiting for run energy...");
-        if (config.useStamina && Inventory.contains(i -> {
-            String n = i.getName();
-            return n != null && n.contains("Stamina potion");
-        })) {
-            Item stamina = Inventory.get(i -> {
-                String n = i.getName();
-                return n != null && n.contains("Stamina potion");
-            });
-            if (stamina != null) {
-                stamina.interact("Drink");
-            }
+        if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+            Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
         } else {
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
@@ -258,10 +281,10 @@ private enum State { TRAVEL, MAZE, REST }
             Sleep.sleepUntil(() -> getLocalPlayer().distance(current.tile) <= 2, 5000);
             return;
         }
-
         handleObstacle(current);
     }
 
+    // Unified, instrumented obstacle handler (merging both branches)
     private void handleObstacle(MazeStep stepDef) {
         if (stepDef == null || stepDef.name == null || stepDef.action == null) {
             obstacleFailed(stepDef != null ? String.valueOf(stepDef.name) : "Unknown", "invalid MazeStep");
@@ -269,9 +292,9 @@ private enum State { TRAVEL, MAZE, REST }
         }
 
         GameObject obj = GameObjects.closest(o ->
-                o != null &&
-                stepDef.name.equals(o.getName()) &&
-                o.hasAction(stepDef.action)
+            o != null &&
+            stepDef.name.equals(o.getName()) &&
+            o.hasAction(stepDef.action)
         );
 
         if (obj == null) {
@@ -286,141 +309,136 @@ private enum State { TRAVEL, MAZE, REST }
             return;
         }
 
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        // Start condition: movement, animation, or expected animation id (if provided)
+        boolean started = Sleep.sleepUntil(
+            () -> getLocalPlayer().isMoving()
+               || getLocalPlayer().isAnimating()
+               || (stepDef.animationId != -1 && getLocalPlayer().getAnimation() == stepDef.animationId),
+            3000
+        );
+        if (!started) {
             obstacleFailed(stepDef.name, "no " + stepDef.action.toLowerCase() + " animation/move");
+            return;
+        }
+
+        // Wait until action completes
+        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+
+        boolean moved = getLocalPlayer().distance(before) > 1;
+        boolean atSuccessTile = stepDef.successTile != null && getLocalPlayer().distance(stepDef.successTile) <= 1;
+
+        if (!moved && !atSuccessTile) {
+            obstacleFailed(stepDef.name, "position unchanged");
+            return;
+        }
+
+        // Success
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
+        failureCount = 0;
+        AntiBan.sleepReaction(abc);
+    }
+
+    // Specialized handler for Squeeze/Squeeze-through gaps
+    private void handleSqueeze(MazeStep s) {
+        GameObject obj = GameObjects.closest(o ->
+            o != null
+            && s != null
+            && s.name.equals(o.getName())
+            && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through"))
+        );
+
+        boolean ok = obj != null && (
+            obj.hasAction("Squeeze") ? obj.interact("Squeeze")
+                                     : obj.interact("Squeeze-through")
+        );
+
+        if (!ok) {
+            obstacleFailed(s != null ? s.name : "SQUEEZE", "interaction failed");
+            return;
+        }
+
+        Tile before = getLocalPlayer().getTile();
+
+        if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+            obstacleFailed(s != null ? s.name : "SQUEEZE", "no squeeze movement");
             return;
         }
 
         Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
 
-// Wait complete — verify we actually moved/acted
-if (getLocalPlayer().distance(before) <= 1) {
-    obstacleFailed(stepDef.name, "position unchanged");
-    return;
-}
-
-// Success: advance the maze step, update our last safe tile, reset failures, and apply anti-ban reaction
-step++;
-lastSafeTile = getLocalPlayer().getTile();
-failureCount = 0;
-AntiBan.sleepReaction(abc);
-}
-
+        if (getLocalPlayer().distance(before) <= 1) {
+            obstacleFailed(s != null ? s.name : "SQUEEZE", "position unchanged");
+            return;
+        }
 
         step++;
         lastSafeTile = getLocalPlayer().getTile();
+        failureCount = 0;
         AntiBan.sleepReaction(abc);
     }
 
-// --- merged, conflict-free section ---
+    // Specialized handler for Search-only interactions (may not move the player)
+    private void handleSearch(MazeStep s) {
+        GameObject obj = GameObjects.closest(o ->
+            o != null
+            && s != null
+            && s.name.equals(o.getName())
+            && o.hasAction("Search")
+        );
 
-private void handleSqueeze(MazeStep s) {
-    GameObject obj = GameObjects.closest(o ->
-        o != null
-        && s != null
-        && s.name.equals(o.getName())
-        && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through"))
-    );
+        if (obj == null || !obj.interact("Search")) {
+            obstacleFailed(s != null ? s.name : "SEARCH", "interaction failed");
+            return;
+        }
 
-    boolean ok = obj != null && (
-        obj.hasAction("Squeeze") ? obj.interact("Squeeze")
-                                 : obj.interact("Squeeze-through")
-    );
+        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+            obstacleFailed(s != null ? s.name : "SEARCH", "no search animation");
+            return;
+        }
 
-    if (!ok) {
-        obstacleFailed(s != null ? s.name : "SQUEEZE", "interaction failed");
-        return;
-    }
+        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
 
-    Tile before = getLocalPlayer().getTile();
-
-    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
-        obstacleFailed(s != null ? s.name : "SQUEEZE", "no squeeze movement");
-        return;
-    }
-
-    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
-
-    if (getLocalPlayer().distance(before) <= 1) {
-        obstacleFailed(s != null ? s.name : "SQUEEZE", "position unchanged");
-        return;
-    }
-
-    step++;
-    lastSafeTile = getLocalPlayer().getTile();
-    failureCount = 0;
-    AntiBan.sleepReaction(abc);
-}
-
-private void handleSearch(MazeStep s) {
-    GameObject obj = GameObjects.closest(o ->
-        o != null
-        && s != null
-        && s.name.equals(o.getName())
-        && o.hasAction("Search")
-    );
-
-    if (obj == null || !obj.interact("Search")) {
-        obstacleFailed(s != null ? s.name : "SEARCH", "interaction failed");
-        return;
-    }
-
-    // Searching usually animates but doesn't move the player; don't require position change.
-    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-        obstacleFailed(s != null ? s.name : "SEARCH", "no search animation");
-        return;
-    }
-
-    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-
-    step++;
-    lastSafeTile = getLocalPlayer().getTile();
-    failureCount = 0;
-    AntiBan.sleepReaction(abc);
-}
-
-// --- merged, conflict-free section ---
-private void obstacleFailed(String obstacleName, String reason) {
-    failureCount++;
-    log("Obstacle " + obstacleName + " failed: " + reason);
-    if (failureCount > FAILURE_THRESHOLD) {
-        log("Failure threshold exceeded, returning to last safe tile");
-        getWalking().walk(lastSafeTile);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
-        step = 0;
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
         failureCount = 0;
+        AntiBan.sleepReaction(abc);
     }
-}
 
-// Compatibility shims for older, specialized handlers.
-// Delegate to the unified handler (handleObstacle) while setting default actions when missing.
-// NOTE: Avoid adding a duplicate handleSearch wrapper if one already exists.
-// --- end merged section ---
+    // Failure handling with threshold/backtrack
+    private void obstacleFailed(String obstacleName, String reason) {
+        failureCount++;
+        log("Obstacle " + obstacleName + " failed: " + reason);
+        if (failureCount > FAILURE_THRESHOLD) {
+            log("Failure threshold exceeded, returning to last safe tile");
+            getWalking().walk(lastSafeTile);
+            Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
+            step = 0;
+            failureCount = 0;
+        }
+    }
 
-private void handleOpen(MazeStep s) {
-    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Open";
-    handleObstacle(s);
-}
+    // Compatibility shims for older, specialized handlers
+    private void handleOpen(MazeStep s) {
+        if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Open";
+        handleObstacle(s);
+    }
 
-private void handleClimb(MazeStep s) {
-    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Climb";
-    handleObstacle(s);
-}
+    private void handleClimb(MazeStep s) {
+        if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Climb";
+        handleObstacle(s);
+    }
 
-private void handlePush(MazeStep s) {
-    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Push";
-    handleObstacle(s);
-}
+    private void handlePush(MazeStep s) {
+        if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Push";
+        handleObstacle(s);
+    }
 
-// Preserved from main
-private void obstacleFailed(String name, String reason) {
-    log("Obstacle " + name + " failed: " + reason);
-    failureCount++;
-    getWalking().walk(lastSafeTile);
-}
 
-// --- end merged section ---
-
+    private void failObstacle(String name) {
+        log("DEBUG: obstacle failed -> " + name);
+        step = 0;
+    }
 
     private void recoverMaze() {
         log("Recovering maze...");
@@ -429,44 +447,47 @@ private void obstacleFailed(String name, String reason) {
         step = 0;
     }
 
-    private boolean handleRewards() {
-        if (Inventory.count(TOKEN_NAME) < 1) {
-            return false;
-        }
-        int attempts = 0;
-        while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
-            NPC npc = NPCs.closest(REWARD_NPC);
-            if (npc != null && npc.interact("Claim")) {
-                boolean success = Sleep.sleepUntil(() -> Inventory.contains(i -> isRogueGear(i.getName())), 5000);
-                if (success) {
-                    if (hasFullRogueSet()) {
-                        log("Full rogue set obtained. Stopping script.");
-                        ScriptManager.getScriptManager().stop();
-                    }
-                    return true;
-                } else {
-                    log("No gear received, retrying...");
-                }
-            } else {
-                log("Failed to locate reward NPC.");
-            }
-            attempts++;
-            Sleep.sleep(600, 1200);
-        }
-        if (Inventory.count(TOKEN_NAME) >= 1) {
-            log("Failed to obtain gear after multiple attempts.");
-        }
-        return true;
-    }
-
-    private boolean isRogueGear(String name) {
-        return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
-    }
-
 // --- merged, conflict-free section ---
 
+private boolean handleRewards() {
+    if (Inventory.count(TOKEN_NAME) < 1) {
+        return false;
+    }
+    int attempts = 0;
+    while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
+        org.dreambot.api.wrappers.interactive.NPC npc = NPCs.closest(REWARD_NPC);
+        if (npc != null && npc.interact("Claim")) {
+            boolean success = Sleep.sleepUntil(
+                () -> Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName())),
+                5000
+            );
+            if (success) {
+                if (hasFullRogueSet()) {
+                    log("Full rogue set obtained. Stopping script.");
+                    ScriptManager.getScriptManager().stop();
+                }
+                return true;
+            } else {
+                log("No gear received, retrying...");
+            }
+        } else {
+            log("Failed to locate reward NPC.");
+        }
+        attempts++;
+        Sleep.sleep(600, 1200);
+    }
+    if (Inventory.count(TOKEN_NAME) >= 1) {
+        log("Failed to obtain gear after multiple attempts.");
+    }
+    return true; // non-blocking: continue script even if rewards failed for now
+}
+
+private boolean isRogueGear(String name) {
+    return name != null && java.util.Arrays.asList(GEAR_ITEMS).contains(name);
+}
+
 private boolean hasFullRogueSet() {
-    List<String> missing = new ArrayList<>();
+    java.util.List<String> missing = new java.util.ArrayList<>();
     for (String item : GEAR_ITEMS) {
         if (!Inventory.contains(item)) {
             missing.add(item);
@@ -498,7 +519,6 @@ private boolean hasFullRogueSet() {
 
 /**
  * Ensures required supplies are available. Returns true if we're good to proceed.
- * Compatible with callers that previously ignored a void return.
  */
 private boolean prepareSupplies() {
     if (suppliesReady) return true;
@@ -514,7 +534,7 @@ private boolean prepareSupplies() {
     }
 
     // Make sure we have at least one stamina potion for run energy management
-    Item stamina = Inventory.get(i -> {
+    org.dreambot.api.wrappers.items.Item stamina = Inventory.get(i -> {
         String n = (i == null) ? null : i.getName();
         return n != null && n.contains("Stamina potion");
     });
@@ -584,23 +604,14 @@ private boolean prepareSupplies() {
                 log("Ironman account detected, skipping coin withdrawal.");
             }
 
-            if (config.useStamina && !Inventory.contains(i -> {
-                String n = i.getName();
-                return n != null && n.contains("Stamina potion");
-            })) {
-                boolean withdrew = getBank().withdrawAll(i -> {
-                    String n = i.getName();
-                    return n != null && n.contains("Stamina potion");
-                });
+// Stamina potions (if configured)
+if (config.useStamina && !Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
+    boolean withdrew = getBank().withdrawAll(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"));
+}
+
                 if (withdrew) {
-                    Sleep.sleepUntil(() -> Inventory.contains(i -> {
-                        String n = i.getName();
-                        return n != null && n.contains("Stamina potion");
-                    }), 2000);
-                    if (!Inventory.contains(i -> {
-                        String n = i.getName();
-                        return n != null && n.contains("Stamina potion");
-                    })) {
+                    Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+                    if (!Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
                         log("Failed to confirm stamina potions in inventory after withdrawal.");
                     }
                 } else {
