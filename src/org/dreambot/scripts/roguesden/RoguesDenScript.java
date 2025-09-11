@@ -89,6 +89,9 @@ public class RoguesDenScript extends AbstractScript {
 
         ironman = getClient().isIronMan();
 
+        // Initialize ABC2 reaction-time trackers once at script start
+        abc.generateTrackers();
+
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
