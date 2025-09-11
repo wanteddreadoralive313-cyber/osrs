@@ -19,6 +19,8 @@ import org.dreambot.api.wrappers.interactive.NPC;
 import org.dreambot.api.wrappers.items.Item;
 
 import javax.swing.SwingUtilities;
+import java.awt.Color;
+import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -75,12 +77,14 @@ public class RoguesDenScript extends AbstractScript {
     private boolean suppliesReady;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
+    private long startTime;
 
     private enum State { TRAVEL, MAZE, REST }
 
     @Override
     public void onStart() {
         log("Starting Rogues' Den script");
+        startTime = System.currentTimeMillis();
         if (!meetsRequirements()) {
             log("Account doesn't meet Rogues' Den requirements.");
             ScriptManager.getScriptManager().stop();
@@ -514,6 +518,32 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public void onExit() {
         if (gui != null) gui.dispose();
+    }
+
+    @Override
+    public void onPaint(Graphics2D g) {
+        g.setColor(new Color(0, 0, 0, 150));
+        g.fillRect(5, 5, 190, 90);
+        g.setColor(Color.WHITE);
+
+        int y = 20;
+        g.drawString("Rogues' Den", 10, y);
+        y += 15;
+        g.drawString("Runtime: " + formatTime(System.currentTimeMillis() - startTime), 10, y);
+        y += 15;
+        g.drawString("Step: " + step + "/" + MAZE_STEPS.length, 10, y);
+        y += 15;
+        g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
+        y += 15;
+        g.drawString("Run: " + getWalking().getRunEnergy(), 10, y);
+    }
+
+    private String formatTime(long ms) {
+        long s = ms / 1000;
+        long h = s / 3600;
+        long m = (s % 3600) / 60;
+        long sec = s % 60;
+        return String.format("%02d:%02d:%02d", h, m, sec);
     }
 
     static class Config {
