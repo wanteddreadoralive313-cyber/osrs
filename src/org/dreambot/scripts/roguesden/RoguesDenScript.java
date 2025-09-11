@@ -146,8 +146,7 @@ private boolean suppliesReady;
         if (!guiDone.get()) return 600;
 
         if (!suppliesReady) {
-            prepareSupplies();
-            suppliesReady = true;
+            suppliesReady = prepareSupplies();
             return 600;
         }
 
@@ -371,31 +370,6 @@ private void handleSearch(MazeStep s) {
 // If your code uses differently named helpers (e.g., handleDoor, handleGate, etc.),
 // add thin wrappers here that simply set a default action (if needed) and call handleObstacle.
 
-}
-
-    private void prepareSupplies() {
-        int attempts = 0;
-        try {
-        // Robustly open the nearest bank (up to 3 attempts)
-        while (attempts < 3 && !getBank().isOpen()) {
-            if (!getBank().openClosest()) {
-                log("Failed to open closest bank. Retrying...");
-                attempts++;
-                Sleep.sleep(600, 1200);
-                continue;
-            }
-            // Bank opened; proceed with supply logic below...
-
-            }
-            attempts++;
-        }
-        if (Inventory.contains(TOKEN_NAME)) {
-            step++;
-        } else {
-            log("Failed to obtain token from chest after multiple attempts.");
-        }
-    }
-
     private void recoverMaze() {
         log("Recovering maze...");
         getWalking().walk(START_TILE);
@@ -433,8 +407,9 @@ private void handleSearch(MazeStep s) {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
     }
 
-    private void prepareSupplies() {
+    private boolean prepareSupplies() {
         int attempts = 0;
+        boolean success = false;
         try {
             // Robustly open the nearest bank (up to 3 attempts)
             while (attempts < 3 && !getBank().isOpen()) {
@@ -449,7 +424,7 @@ private void handleSearch(MazeStep s) {
 
             if (!getBank().isOpen()) {
                 log("Unable to open bank after multiple attempts. Aborting supply preparation.");
-                return;
+                return false;
             }
 
             // Coins (skip on ironman)
@@ -490,6 +465,7 @@ private void handleSearch(MazeStep s) {
                     log("Bank failed to withdraw stamina potions.");
                 }
             }
+            success = true;
         } finally {
             // Always try to close the bank
             if (getBank().isOpen()) {
@@ -497,6 +473,7 @@ private void handleSearch(MazeStep s) {
                 Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
             }
         }
+        return success;
     }
 
     @Override
