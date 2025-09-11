@@ -141,11 +141,16 @@ public class RoguesDenScript extends AbstractScript {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
-    private boolean suppliesReady;
-    private int failureCount = 0;
-    private Tile lastSafeTile = START_TILE;
+// --- merged, conflict-free section ---
+private static final int FAILURE_THRESHOLD = 3;
 
-    private enum State { TRAVEL, MAZE, REST }
+private boolean suppliesReady;
+private int failureCount = 0;
+private Tile lastSafeTile = START_TILE;
+
+private enum State { TRAVEL, MAZE, REST }
+// --- end merged section ---
+
 
     @Override
     public void onStart() {
@@ -288,10 +293,19 @@ public class RoguesDenScript extends AbstractScript {
 
         Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
 
-        if (getLocalPlayer().distance(before) <= 1) {
-            obstacleFailed(stepDef.name, "position unchanged");
-            return;
-        }
+// Wait complete — verify we actually moved/acted
+if (getLocalPlayer().distance(before) <= 1) {
+    obstacleFailed(stepDef.name, "position unchanged");
+    return;
+}
+
+// Success: advance the maze step, update our last safe tile, reset failures, and apply anti-ban reaction
+step++;
+lastSafeTile = getLocalPlayer().getTile();
+failureCount = 0;
+AntiBan.sleepReaction(abc);
+}
+
 
         step++;
         lastSafeTile = getLocalPlayer().getTile();
@@ -334,6 +348,7 @@ private void handleSqueeze(MazeStep s) {
 
     step++;
     lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
     AntiBan.sleepReaction(abc);
 }
 
@@ -360,12 +375,28 @@ private void handleSearch(MazeStep s) {
 
     step++;
     lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
     AntiBan.sleepReaction(abc);
+}
+
+// --- merged, conflict-free section ---
+private void obstacleFailed(String obstacleName, String reason) {
+    failureCount++;
+    log("Obstacle " + obstacleName + " failed: " + reason);
+    if (failureCount > FAILURE_THRESHOLD) {
+        log("Failure threshold exceeded, returning to last safe tile");
+        getWalking().walk(lastSafeTile);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
+        step = 0;
+        failureCount = 0;
+    }
 }
 
 // Compatibility shims for older, specialized handlers.
 // Delegate to the unified handler (handleObstacle) while setting default actions when missing.
-// NOTE: No handleSearch wrapper here to avoid duplicate method names.
+// NOTE: Avoid adding a duplicate handleSearch wrapper if one already exists.
+// --- end merged section ---
+
 private void handleOpen(MazeStep s) {
     if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Open";
     handleObstacle(s);
