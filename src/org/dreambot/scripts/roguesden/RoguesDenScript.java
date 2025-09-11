@@ -14,7 +14,87 @@ import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
-import org.dreambot.api.wrappers.interactive.NPC;
+// === Rogues' Den config & planning ===
+private static final String TOKEN_NAME = "Rogue's reward token";
+private static final String REWARD_NPC = "Rogue";
+private static final String[] GEAR_ITEMS = {
+    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+};
+
+private enum Interaction {
+    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
+}
+
+private static class MazeStep {
+    final Tile tile;
+    final Interaction interaction;
+    final String obstacle;
+
+    MazeStep(Tile tile, Interaction interaction, String obstacle) {
+        this.tile = tile;
+        this.interaction = interaction;
+        this.obstacle = obstacle;
+    }
+}
+
+private final MazeStep[] MAZE_PLAN = new MazeStep[] {
+    new MazeStep(new Tile(3047, 4973, 1), Interaction.OPEN, "Door"),
+    new MazeStep(new Tile(3048, 4970, 1), Interaction.CLIMB, "Rubble"),
+    new MazeStep(new Tile(3050, 4970, 1), Interaction.SQUEEZE, "Gap"),
+    new MazeStep(new Tile(3052, 4968, 1), Interaction.DISARM, "Trap"),
+    new MazeStep(new Tile(3054, 4968, 1), Interaction.SEARCH, "Crate")
+};
+
+// === Runtime state ===
+private int step = 0;
+private Config config = new Config();
+private RoguesDenGUI gui;
+private boolean ironman;
+private boolean suppliesReady;
+
+@Override
+public void onStart() {
+    log("Starting Rogues' Den script");
+    if (!meetsRequirements()) {
+        log("Account doesn't meet Rogues' Den requirements.");
+        ScriptManager.getScriptManager().stop();
+        return;
+    }
+    ironman = getClient().isIronMan();
+    SwingUtilities.invokeLater(() -> {
+        gui = new RoguesDenGUI(config, guiDone);
+        gui.setVisible(true);
+    });
+}
+
+private boolean meetsRequirements() {
+    return getSkills().getRealLevel(Skill.THIEVING) >= 50
+        && getSkills().getRealLevel(Skill.AGILITY) >= 50;
+}
+
+@Override
+public int onLoop() {
+    if (!guiDone.get()) return 600;
+
+    if (!suppliesReady) {
+        prepareSupplies();
+        suppliesReady = true;
+        return 600;
+    }
+
+    if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
+        getWalking().toggleRun(true);
+    }
+
+    AntiBan.permute(this, abc, config);
+
+    if (handleRewards()) {
+        // (continue with reward handling logic)
+    }
+
+    return 600;
+}
+
 import javax.swing.SwingUtilities;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -75,6 +155,7 @@ private final MazeStep[] MAZE_PLAN = {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
+    private boolean suppliesReady;
 
     @Override
     public void onStart() {
@@ -89,13 +170,6 @@ private final MazeStep[] MAZE_PLAN = {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
         });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            prepareSupplies();
-        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -105,6 +179,12 @@ private final MazeStep[] MAZE_PLAN = {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
+
+        if (!suppliesReady) {
+            prepareSupplies();
+            suppliesReady = true;
+            return 600;
+        }
 
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
@@ -148,8 +228,17 @@ private final MazeStep[] MAZE_PLAN = {
 
     private void handleRest() {
         log("Waiting for run energy...");
-        if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
+        if (config.useStamina && Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Stamina potion");
+        })) {
+            Item stamina = Inventory.get(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
+            if (stamina != null) {
+                stamina.interact("Drink");
+            }
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
         } else {
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
