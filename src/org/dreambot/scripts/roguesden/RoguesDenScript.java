@@ -34,6 +34,8 @@ public class RoguesDenScript extends AbstractScript {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
+    private int failureCount = 0;
+    private Tile lastSafeTile = START_TILE;
 
     @Override
     public void onStart() {
@@ -146,38 +148,86 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleDoor() {
         GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
-        if (door != null && door.interact("Open")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
-            step++;
+        if (door == null || !door.interact("Open")) {
+            obstacleFailed("Door", "interaction failed");
+            return;
         }
+        Tile before = getLocalPlayer().getTile();
+        if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+            obstacleFailed("Door", "door didn't open");
+            return;
+        }
+        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+        if (getLocalPlayer().distance(before) <= 1) {
+            obstacleFailed("Door", "position unchanged");
+            return;
+        }
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
     }
 
     private void handleClimb() {
         GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
-        if (climb != null && climb.interact("Climb")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-            step++;
+        if (climb == null || !climb.interact("Climb")) {
+            obstacleFailed("Climb", "interaction failed");
+            return;
         }
+        Tile before = getLocalPlayer().getTile();
+        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+            obstacleFailed("Climb", "no climb animation");
+            return;
+        }
+        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+        if (getLocalPlayer().distance(before) <= 1) {
+            obstacleFailed("Climb", "trap triggered");
+            return;
+        }
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
     }
 
     private void handleSqueeze() {
         GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
-        if (squeeze != null && squeeze.interact("Squeeze")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-            step++;
+        if (squeeze == null || !squeeze.interact("Squeeze")) {
+            obstacleFailed("Squeeze", "interaction failed");
+            return;
         }
+        Tile before = getLocalPlayer().getTile();
+        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+            obstacleFailed("Squeeze", "no squeeze animation");
+            return;
+        }
+        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+        if (getLocalPlayer().distance(before) <= 1) {
+            obstacleFailed("Squeeze", "trap triggered");
+            return;
+        }
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
     }
 
-private void recoverMaze() {
-    log("Recovering maze...");
-    getWalking().walk(START_TILE);
-    Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
-    step = 0;
-}
+    private void obstacleFailed(String obstacle, String reason) {
+        failureCount++;
+        log("Obstacle failed (" + obstacle + "): " + reason);
+        recoverToSafeTile();
+    }
 
-private void prepareSupplies() {
-    int attempts = 0;
-    try {
+    private void recoverToSafeTile() {
+        log("Recovering to safe tile...");
+        getWalking().walk(lastSafeTile);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
+    }
+
+    private void recoverMaze() {
+        log("Recovering maze...");
+        getWalking().walk(START_TILE);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+        step = 0;
+    }
+
+    private void prepareSupplies() {
+        int attempts = 0;
+        try {
         // Robustly open the nearest bank (up to 3 attempts)
         while (attempts < 3 && !getBank().isOpen()) {
             if (!getBank().openClosest()) {
