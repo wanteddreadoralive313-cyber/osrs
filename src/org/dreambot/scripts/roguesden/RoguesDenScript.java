@@ -16,6 +16,8 @@ import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
 import javax.swing.SwingUtilities;
+import java.util.ArrayList;
+import java.util.List;
 
 private static final String TOKEN_NAME = "Rogue's reward token";
 private static final String REWARD_NPC = "Rogue";
@@ -413,6 +415,10 @@ private void handleSearch(MazeStep s) {
             if (npc != null && npc.interact("Claim")) {
                 boolean success = Sleep.sleepUntil(() -> Inventory.contains(i -> isRogueGear(i.getName())), 5000);
                 if (success) {
+                    if (hasFullRogueSet()) {
+                        log("Full rogue set obtained. Stopping script.");
+                        ScriptManager.getScriptManager().stop();
+                    }
                     return true;
                 } else {
                     log("No gear received, retrying...");
@@ -431,6 +437,37 @@ private void handleSearch(MazeStep s) {
 
     private boolean isRogueGear(String name) {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
+    }
+
+    private boolean hasFullRogueSet() {
+        List<String> missing = new ArrayList<>();
+        for (String item : GEAR_ITEMS) {
+            if (!Inventory.contains(item)) {
+                missing.add(item);
+            }
+        }
+        if (missing.isEmpty()) {
+            return true;
+        }
+
+        boolean opened = false;
+        if (!getBank().isOpen()) {
+            if (!getBank().openClosest()) {
+                log("Could not open bank to verify rogue set.");
+                return false;
+            }
+            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+            opened = true;
+        }
+
+        boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
+
+        if (opened) {
+            getBank().close();
+            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        }
+
+        return allPresent;
     }
 
     private void prepareSupplies() {
