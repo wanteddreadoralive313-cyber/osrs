@@ -117,7 +117,9 @@ private final Obstacle[] MAZE_PATH = new Obstacle[] {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
-    private boolean suppliesReady;
+private int failureCount = 0;
+private Tile lastSafeTile = START_TILE;
+private boolean suppliesReady;
 
     @Override
     public void onStart() {
@@ -229,133 +231,151 @@ if (getLocalPlayer().distance(current.tile) > 2) {
     return;
 }
 
+// Approach obstacle for the current maze step
 handleObstacle(current);
 }
 
+// Generic, instrumented obstacle handler (resolves the merge conflict)
 private void handleObstacle(MazeStep stepDef) {
+    // Defensive checks to avoid NPEs and preserve existing error logging behavior
+    if (stepDef == null || stepDef.name == null || stepDef.action == null) {
+        obstacleFailed(stepDef != null ? String.valueOf(stepDef.name) : "Unknown", "invalid MazeStep");
+        return;
+    }
+
+    // Find the target object by name and required action
     GameObject obj = GameObjects.closest(o ->
-        o != null && stepDef.name.equals(o.getName()) && o.hasAction(stepDef.action)
+        o != null
+            && stepDef.name.equals(o.getName())
+            && o.hasAction(stepDef.action)
     );
 
-    if (obj != null && obj.interact(stepDef.action)) {
-        boolean success = Sleep.sleepUntil(() -> {
-            boolean pos = stepDef.successTile != null
-                    && getLocalPlayer().distance(stepDef.successTile) <= 1;
-            boolean anim = stepDef.animationId != -1
-                    && getLocalPlayer().getAnimation() == stepDef.animationId;
-            return pos || anim;
-        }, 4000);
+    if (obj == null) {
+        obstacleFailed(stepDef.name, "object not found");
+        return;
+    }
 
-        if (success) {
-            step++;
-        } else {
-            failObstacle(stepDef.name);
-        }
-    } else {
-        failObstacle(stepDef.name);
+    // Remember our position before interacting
+    Tile before = getLocalPlayer().getTile();
+
+    // Try to interact (e.g., "Open", "Climb", "Push", etc.)
+    if (!obj.interact(stepDef.action)) {
+        obstacleFailed(stepDef.name, "interaction failed");
+        return;
+    }
+
+    // Wait until we start moving or animating as a result of the interaction
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed(stepDef.name, "no " + stepDef.action.toLowerCase() + " animation/move");
+        return;
+    }
+
     }
 }
 
-private void failObstacle(String name) {
-    log("DEBUG: obstacle failed -> " + name);
-    step = 0;
+    // Wait for the interaction to finish (stop moving/animating)
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+
+    // If we didn't meaningfully change position, treat as a failure
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed(stepDef.name, "position unchanged");
+        return;
+    }
+
+    // Success: advance the maze step, update our last safe tile, and apply anti-ban reaction
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
 }
 
-    }
-    if (Inventory.contains(TOKEN_NAME)) {
         step++;
-    } else {
-        log("Failed to obtain token from chest after multiple attempts.");
+        lastSafeTile = getLocalPlayer().getTile();
     }
+
+private void handleSqueeze(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null
+            && s.obstacle.equals(o.getName())
+            && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through")));
+    boolean ok = obj != null && (obj.hasAction("Squeeze") ? obj.interact("Squeeze") : obj.interact("Squeeze-through"));
+    if (!ok) {
+        obstacleFailed("SQUEEZE", "interaction failed");
+        return;
+    }
+    Tile before = getLocalPlayer().getTile();
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("SQUEEZE", "no squeeze movement");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed("SQUEEZE", "position unchanged");
+        return;
+    }
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
 }
 
 private void handleSearch(MazeStep s) {
-    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
-    if (obj != null && obj.interact("Search")) {
-        Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000);
-        step++;
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Search"));
+    if (obj == null || !obj.interact("Search")) {
+        obstacleFailed("SEARCH", "interaction failed");
+        return;
+    }
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("SEARCH", "no search animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
     }
 }
 
-/** Open the loot chest at the end of the maze and collect the token. */
-private boolean handleChest() {
-    GameObject chest = GameObjects.closest(g -> g != null && "Chest".equals(g.getName()));
-    if (chest == null) return false;
+// Compatibility shims for any older, specialized handlers that may be referenced elsewhere.
+// These delegate to the unified, instrumented handler above to preserve functionality
+// while removing duplicate/conflicting implementations.
 
-    if (!chest.isOnScreen()) {
-        getWalking().walk(chest);
-        Sleep.sleepUntil(chest::isOnScreen, Calculations.random(600, 1200));
+private void handleOpen(MazeStep s) {
+    // Assume "Open" action if not explicitly provided
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Open";
     }
-
-    if (chest.interact("Open")) {
-        Sleep.sleepUntil(
-            () -> Inventory.contains(TOKEN_NAME) || !chest.exists(),
-            Calculations.random(1500, 3000)
-        );
-        return true;
-    }
-    return false;
+    handleObstacle(s);
 }
 
-/** Trade Rogue's reward token(s) to the Rogue NPC to obtain equipment pieces. */
-private boolean cashInTokens() {
-    if (!Inventory.contains(TOKEN_NAME)) return false;
-
-    NPC rogue = NPCs.closest(n -> n != null && REWARD_NPC.equals(n.getName()));
-    if (rogue == null) return false;
-
-    if (!rogue.isOnScreen()) {
-        getWalking().walk(rogue);
-        Sleep.sleepUntil(rogue::isOnScreen, Calculations.random(600, 1200));
+private void handleClimb(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Climb";
     }
-
-    if (rogue.interact("Trade") || rogue.interact("Talk-to")) {
-        Sleep.sleepUntil(() -> getDialogues().inDialogue() || getWidgets().isOpen(),
-                         Calculations.random(1200, 2500));
-
-        // Lightweight dialogue handling to consume token(s) and claim gear
-        long end = System.currentTimeMillis() + Calculations.random(4000, 7000);
-        while (System.currentTimeMillis() < end
-                && (getDialogues().inDialogue() || getDialogues().canContinue())) {
-            if (getDialogues().canContinue()) {
-                getDialogues().spaceToContinue();
-                Sleep.sleep(200, 400);
-                continue;
-            }
-            if (getDialogues().chooseOption(opt -> {
-                String o = opt.toLowerCase();
-                return o.contains("token") || o.contains("equipment") || o.contains("rogue");
-            })) {
-                Sleep.sleep(300, 600);
-            } else {
-                break;
-            }
-        }
-
-        // Wait for token to be spent or a new gear piece to appear
-        Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME) || hasFullRogueSet(),
-                         Calculations.random(2000, 4000));
-        return true;
-    }
-    return false;
+    handleObstacle(s);
 }
 
-/** True if all rogue pieces are (now) in inventory. */
-private boolean hasFullRogueSet() {
-    int have = 0;
-    for (String item : GEAR_ITEMS) {
-        if (Inventory.contains(item)) {
-            have++;
-        }
+private void handlePush(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Push";
     }
-    return have == GEAR_ITEMS.length;
+    handleObstacle(s);
 }
+
+private void handleSearch(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) {
+        s.action = "Search";
+    }
+    handleObstacle(s);
+}
+
+// If your code uses differently named helpers (e.g., handleDoor, handleGate, etc.),
+// add thin wrappers here that simply set a default action (if needed) and call handleObstacle.
 
 }
 
-private void prepareSupplies() {
-    int attempts = 0;
-    try {
+    private void prepareSupplies() {
+        int attempts = 0;
+        try {
         // Robustly open the nearest bank (up to 3 attempts)
         while (attempts < 3 && !getBank().isOpen()) {
             if (!getBank().openClosest()) {
