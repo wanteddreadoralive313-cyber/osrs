@@ -19,10 +19,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
 public class RoguesDenScript extends AbstractScript {
 
+    private enum State { TRAVEL, MAZE, REST }
+
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1); // approximate
     private final Tile START_TILE = new Tile(3047,4975,1);
+    private final Tile[] MAZE_STEPS = {
+            new Tile(3047,4973,1), // first door
+            new Tile(3048,4970,1), // climb obstacle
+            new Tile(3050,4970,1)  // squeeze obstacle
+    };
+    private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
@@ -58,62 +66,131 @@ public class RoguesDenScript extends AbstractScript {
         if (!guiDone.get()) return 600;
         AntiBan.permute(this, abc, config.antiban);
 
-        if (!DEN_AREA.contains(getLocalPlayer())) {
-            getWalking().walk(START_TILE);
-            Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
-            return Calculations.random(300,600);
+        State state = getState();
+        switch (state) {
+            case TRAVEL:
+                getWalking().walk(START_TILE);
+                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
+                return Calculations.random(300,600);
+            case REST:
+                handleRest();
+                return Calculations.random(600,900);
+            case MAZE:
+                if (!getLocalPlayer().isAnimating() && !getLocalPlayer().isMoving()) {
+                    handleMaze();
+                }
+                return Calculations.random(200,400);
         }
-
-        if (shouldWaitRun()) {
-            log("Waiting for run energy...");
-            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
-            return Calculations.random(600,900);
-        }
-
-        if (!getLocalPlayer().isAnimating() && !getLocalPlayer().isMoving())
-            interactMaze();
-
         return Calculations.random(200,400);
     }
 
-    private boolean shouldWaitRun() {
-        if (getWalking().getRunEnergy() >= config.runThreshold) return false;
+    private State getState() {
+        if (!DEN_AREA.contains(getLocalPlayer()))
+            return State.TRAVEL;
+        if (needsRest())
+            return State.REST;
+        return State.MAZE;
+    }
+
+    private boolean needsRest() {
+        return getWalking().getRunEnergy() < config.runThreshold;
+    }
+
+    private void handleRest() {
+        log("Waiting for run energy...");
         if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
             Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
-            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runThreshold, 3000);
-            return false;
-        }
-        return true;
-    }
-
-    private void interactMaze() {
-        GameObject obj = GameObjects.closest(o -> o.hasAction("Open") || o.hasAction("Climb") || o.hasAction("Squeeze"));
-        if (obj != null && obj.interact()) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 5000);
+            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
         } else {
-            Sleep.sleep(400,700);
+            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
         }
     }
 
-    private void prepareSupplies() {
-        if (getBank().openClosest()) {
-            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-
-            if (!ironman && !Inventory.contains("Coins")) {
-                getBank().withdrawAll("Coins");
-                Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
-            } else if (ironman) {
-                log("Ironman account detected, skipping coin withdrawal.");
-            }
-
-            if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-                getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
-                Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
-            }
-
-            getBank().close();
-            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    private void handleMaze() {
+        if (getLocalPlayer().distance(START_TILE) <= 1 && step > 0) {
+            recoverMaze();
+            return;
         }
+
+        if (step >= MAZE_STEPS.length) {
+            step = 0;
+            return;
+        }
+
+        Tile target = MAZE_STEPS[step];
+        if (getLocalPlayer().distance(target) > 2) {
+            getWalking().walk(target);
+            Sleep.sleepUntil(() -> getLocalPlayer().distance(target) <= 2, 5000);
+            return;
+        }
+
+        switch (step) {
+            case 0:
+                handleDoor();
+                break;
+            case 1:
+                handleClimb();
+                break;
+            case 2:
+                handleSqueeze();
+                break;
+            default:
+                step = 0;
+        }
+    }
+
+    private void handleDoor() {
+        GameObject door = GameObjects.closest(o -> o.getName().equals("Door"));
+        if (door != null && door.interact("Open")) {
+            Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
+            step++;
+        }
+    }
+
+    private void handleClimb() {
+        GameObject climb = GameObjects.closest(o -> o.hasAction("Climb"));
+        if (climb != null && climb.interact("Climb")) {
+            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+            step++;
+        }
+    }
+
+private void handleSqueeze() {
+    GameObject squeeze = GameObjects.closest(o -> o.hasAction("Squeeze"));
+    if (squeeze != null && squeeze.interact("Squeeze")) {
+        Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+        step++;
+    }
+}
+
+private void recoverMaze() {
+    log("Recovering maze...");
+    getWalking().walk(START_TILE);
+    Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+    step = 0;
+}
+
+private void prepareSupplies() {
+    if (getBank().openClosest()) {
+        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+
+        if (!ironman && !Inventory.contains("Coins")) {
+            getBank().withdrawAll("Coins");
+            Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+        } else if (ironman) {
+            log("Ironman account detected, skipping coin withdrawal.");
+        }
+
+        if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+            getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
+            Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+        }
+
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+}
+
     }
 
     @Override
