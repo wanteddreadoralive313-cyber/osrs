@@ -49,7 +49,7 @@ public class RoguesDenScript extends AbstractScript {
     @Override
     public int onLoop() {
         if (!guiDone.get()) return 600;
-        AntiBan.permute(this, abc, config.antiban);
+        AntiBan.permute(this, abc, config);
 
         if (!DEN_AREA.contains(getLocalPlayer())) {
             getWalking().walk(START_TILE);
@@ -96,6 +96,11 @@ public class RoguesDenScript extends AbstractScript {
     static class Config {
         boolean useStamina = true;
         boolean antiban = true;
+        boolean hoverEntities = true;
+        boolean randomRightClick = true;
+        boolean cameraPanning = true;
+        int idleMin = 200;
+        int idleMax = 600;
         int runThreshold = 20;
         int runRestore = 40;
     }
