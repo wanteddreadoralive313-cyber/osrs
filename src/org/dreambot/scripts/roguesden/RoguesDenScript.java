@@ -235,6 +235,32 @@ if (getLocalPlayer().distance(current.tile) > 2) {
 handleObstacle(current);
 }
 
+    private void handleChest() {
+        if (Inventory.isFull()) {
+            log("Inventory full, cannot loot reward chest.");
+            return;
+        }
+
+        GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
+        if (chest == null) {
+            log("Reward chest not found.");
+            return;
+        }
+
+        int before = Inventory.count(TOKEN_NAME);
+        if (!chest.interact("Open")) {
+            log("Failed to open reward chest.");
+            return;
+        }
+
+        if (Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) > before, 5000)) {
+            step = 0;
+            lastSafeTile = getLocalPlayer().getTile();
+        } else {
+            log("No token received from chest.");
+        }
+    }
+
 // Generic, instrumented obstacle handler (resolves the merge conflict)
 private void handleObstacle(MazeStep stepDef) {
     // Defensive checks to avoid NPEs and preserve existing error logging behavior
