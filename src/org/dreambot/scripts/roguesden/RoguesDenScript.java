@@ -140,7 +140,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleDoor() {
-        GameObject door = GameObjects.closest(o -> o.getName().equals("Door"));
+        GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
         if (door != null && door.interact("Open")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
             step++;
@@ -148,49 +148,47 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleClimb() {
-        GameObject climb = GameObjects.closest(o -> o.hasAction("Climb"));
+        GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
         if (climb != null && climb.interact("Climb")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
         }
     }
 
-private void handleSqueeze() {
-    GameObject squeeze = GameObjects.closest(o -> o.hasAction("Squeeze"));
-    if (squeeze != null && squeeze.interact("Squeeze")) {
-        Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-        step++;
-    }
-}
-
-private void recoverMaze() {
-    log("Recovering maze...");
-    getWalking().walk(START_TILE);
-    Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
-    step = 0;
-}
-
-private void prepareSupplies() {
-    if (getBank().openClosest()) {
-        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-
-        if (!ironman && !Inventory.contains("Coins")) {
-            getBank().withdrawAll("Coins");
-            Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
-        } else if (ironman) {
-            log("Ironman account detected, skipping coin withdrawal.");
+    private void handleSqueeze() {
+        GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
+        if (squeeze != null && squeeze.interact("Squeeze")) {
+            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+            step++;
         }
-
-        if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
-            Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
-        }
-
-        getBank().close();
-        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
     }
-}
 
+    private void recoverMaze() {
+        log("Recovering maze...");
+        getWalking().walk(START_TILE);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+        step = 0;
+    }
+
+    private void prepareSupplies() {
+        if (getBank().openClosest()) {
+            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+
+            if (!ironman && !Inventory.contains("Coins")) {
+                getBank().withdrawAll("Coins");
+                Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+            } else if (ironman) {
+                log("Ironman account detected, skipping coin withdrawal.");
+            }
+
+            if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+                getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
+                Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+            }
+
+            getBank().close();
+            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        }
     }
 
     @Override
