@@ -191,8 +191,6 @@ private void prepareSupplies() {
     }
 }
 
-    }
-
     @Override
     public void onExit() {
         if (gui != null) gui.dispose();
