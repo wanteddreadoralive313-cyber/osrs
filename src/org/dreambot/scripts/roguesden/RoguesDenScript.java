@@ -173,8 +173,7 @@ public class RoguesDenScript extends AbstractScript {
         if (!guiDone.get()) return 600;
 
         if (!suppliesReady) {
-            prepareSupplies();
-            suppliesReady = true;
+            suppliesReady = prepareSupplies();
             return 600;
         }
 
@@ -299,11 +298,98 @@ public class RoguesDenScript extends AbstractScript {
         AntiBan.sleepReaction(abc);
     }
 
-    private void obstacleFailed(String name, String reason) {
-        log("Obstacle " + name + " failed: " + reason);
-        failureCount++;
-        getWalking().walk(lastSafeTile);
+// --- merged, conflict-free section ---
+
+private void handleSqueeze(MazeStep s) {
+    GameObject obj = GameObjects.closest(o ->
+        o != null
+        && s != null
+        && s.name.equals(o.getName())
+        && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through"))
+    );
+
+    boolean ok = obj != null && (
+        obj.hasAction("Squeeze") ? obj.interact("Squeeze")
+                                 : obj.interact("Squeeze-through")
+    );
+
+    if (!ok) {
+        obstacleFailed(s != null ? s.name : "SQUEEZE", "interaction failed");
+        return;
     }
+
+    Tile before = getLocalPlayer().getTile();
+
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed(s != null ? s.name : "SQUEEZE", "no squeeze movement");
+        return;
+    }
+
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed(s != null ? s.name : "SQUEEZE", "position unchanged");
+        return;
+    }
+
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
+private void handleSearch(MazeStep s) {
+    GameObject obj = GameObjects.closest(o ->
+        o != null
+        && s != null
+        && s.name.equals(o.getName())
+        && o.hasAction("Search")
+    );
+
+    if (obj == null || !obj.interact("Search")) {
+        obstacleFailed(s != null ? s.name : "SEARCH", "interaction failed");
+        return;
+    }
+
+    // Searching usually animates but doesn't move the player; don't require position change.
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed(s != null ? s.name : "SEARCH", "no search animation");
+        return;
+    }
+
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
+// Compatibility shims for older, specialized handlers.
+// Delegate to the unified handler (handleObstacle) while setting default actions when missing.
+// NOTE: No handleSearch wrapper here to avoid duplicate method names.
+private void handleOpen(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Open";
+    handleObstacle(s);
+}
+
+private void handleClimb(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Climb";
+    handleObstacle(s);
+}
+
+private void handlePush(MazeStep s) {
+    if (s != null && (s.action == null || s.action.isEmpty())) s.action = "Push";
+    handleObstacle(s);
+}
+
+// Preserved from main
+private void obstacleFailed(String name, String reason) {
+    log("Obstacle " + name + " failed: " + reason);
+    failureCount++;
+    getWalking().walk(lastSafeTile);
+}
+
+// --- end merged section ---
+
 
     private void recoverMaze() {
         log("Recovering maze...");
@@ -346,39 +432,98 @@ public class RoguesDenScript extends AbstractScript {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
     }
 
-    private boolean hasFullRogueSet() {
-        List<String> missing = new ArrayList<>();
-        for (String item : GEAR_ITEMS) {
-            if (!Inventory.contains(item)) {
-                missing.add(item);
-            }
-        }
-        if (missing.isEmpty()) {
-            return true;
-        }
+// --- merged, conflict-free section ---
 
-        boolean opened = false;
+private boolean hasFullRogueSet() {
+    List<String> missing = new ArrayList<>();
+    for (String item : GEAR_ITEMS) {
+        if (!Inventory.contains(item)) {
+            missing.add(item);
+        }
+    }
+    if (missing.isEmpty()) {
+        return true;
+    }
+
+    boolean opened = false;
+    if (!getBank().isOpen()) {
+        if (!getBank().openClosest()) {
+            log("Could not open bank to verify rogue set.");
+            return false;
+        }
+        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+        opened = true;
+    }
+
+    boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
+
+    if (opened) {
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+
+    return allPresent;
+}
+
+/**
+ * Ensures required supplies are available. Returns true if we're good to proceed.
+ * Compatible with callers that previously ignored a void return.
+ */
+private boolean prepareSupplies() {
+    if (suppliesReady) return true;
+
+    // Ensure we have the full Rogue set either on us or available in bank
+    boolean haveSetInInv = true;
+    for (String item : GEAR_ITEMS) {
+        if (!Inventory.contains(item)) { haveSetInInv = false; break; }
+    }
+    if (!haveSetInInv && !hasFullRogueSet()) {
+        log("Missing Rogue gear pieces and not all found in bank.");
+        return false;
+    }
+
+    // Make sure we have at least one stamina potion for run energy management
+    Item stamina = Inventory.get(i -> {
+        String n = (i == null) ? null : i.getName();
+        return n != null && n.contains("Stamina potion");
+    });
+
+    boolean opened = false;
+    if (stamina == null) {
         if (!getBank().isOpen()) {
             if (!getBank().openClosest()) {
-                log("Could not open bank to verify rogue set.");
+                log("Could not open bank to withdraw supplies.");
                 return false;
             }
             Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
             opened = true;
         }
 
-        boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
-
-        if (opened) {
-            getBank().close();
-            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
+            // Withdraw one potion (any dose)
+            getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
+            Sleep.sleepUntil(() ->
+                Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion")),
+                2000
+            );
+        } else {
+            log("No stamina potions available in bank.");
         }
-
-        return allPresent;
     }
 
-    private void prepareSupplies() {
+    if (opened) {
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+
+    suppliesReady = true;
+    return true;
+}
+
+// --- end merged section ---
+
         int attempts = 0;
+        boolean success = false;
         try {
             while (attempts < 3 && !getBank().isOpen()) {
                 if (!getBank().openClosest()) {
@@ -392,7 +537,7 @@ public class RoguesDenScript extends AbstractScript {
 
             if (!getBank().isOpen()) {
                 log("Unable to open bank after multiple attempts. Aborting supply preparation.");
-                return;
+                return false;
             }
 
             if (!ironman && !Inventory.contains("Coins")) {
@@ -431,12 +576,14 @@ public class RoguesDenScript extends AbstractScript {
                     log("Bank failed to withdraw stamina potions.");
                 }
             }
+            success = true;
         } finally {
             if (getBank().isOpen()) {
                 getBank().close();
                 Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
             }
         }
+        return success;
     }
 
     @Override
