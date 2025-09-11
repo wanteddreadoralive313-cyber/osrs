@@ -105,6 +105,11 @@ public class RoguesDenScript extends AbstractScript {
             while (!guiDone.get()) {
                 Sleep.sleep(100);
             }
+            if (!validateConfig(config)) {
+                log("Invalid configuration; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
+            }
             prepareSupplies();
         }).start();
     }
@@ -112,6 +117,26 @@ public class RoguesDenScript extends AbstractScript {
     private boolean meetsRequirements() {
         return getSkills().getRealLevel(Skill.THIEVING) >= 50
             && getSkills().getRealLevel(Skill.AGILITY) >= 50;
+    }
+
+    private boolean validateConfig(Config cfg) {
+        if (cfg.runThreshold < 0 || cfg.runRestore > 100 || cfg.runThreshold >= cfg.runRestore) {
+            log("Run threshold must be within 0-100 and less than run restore.");
+            return false;
+        }
+        if (cfg.idleMin < 0 || cfg.idleMax < 0 || cfg.idleMin > cfg.idleMax) {
+            log("Idle range is invalid.");
+            return false;
+        }
+        if (cfg.breakIntervalMin < 0 || cfg.breakIntervalMax < 0 || cfg.breakIntervalMin > cfg.breakIntervalMax) {
+            log("Break interval range is invalid.");
+            return false;
+        }
+        if (cfg.breakLengthMin < 0 || cfg.breakLengthMax < 0 || cfg.breakLengthMin > cfg.breakLengthMax) {
+            log("Break length range is invalid.");
+            return false;
+        }
+        return true;
     }
 
     @Override
