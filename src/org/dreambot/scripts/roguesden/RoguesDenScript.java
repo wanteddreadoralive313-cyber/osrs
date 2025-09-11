@@ -117,6 +117,7 @@ private final Obstacle[] MAZE_PATH = new Obstacle[] {
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
+private static final int FAILURE_THRESHOLD = 3;
 private int failureCount = 0;
 private Tile lastSafeTile = START_TILE;
 private boolean suppliesReady;
@@ -285,6 +286,7 @@ private void handleObstacle(MazeStep stepDef) {
     // Success: advance the maze step, update our last safe tile, and apply anti-ban reaction
     step++;
     lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
     AntiBan.sleepReaction(abc);
 }
 
@@ -313,6 +315,7 @@ private void handleSqueeze(MazeStep s) {
     }
     step++;
     lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
     AntiBan.sleepReaction(abc);
 }
 
@@ -329,7 +332,20 @@ private void handleSearch(MazeStep s) {
     Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
     step++;
     lastSafeTile = getLocalPlayer().getTile();
+    failureCount = 0;
     AntiBan.sleepReaction(abc);
+}
+
+private void obstacleFailed(String obstacleName, String reason) {
+    failureCount++;
+    log("Obstacle " + obstacleName + " failed: " + reason);
+    if (failureCount > FAILURE_THRESHOLD) {
+        log("Failure threshold exceeded, returning to last safe tile");
+        getWalking().walk(lastSafeTile);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
+        step = 0;
+        failureCount = 0;
+    }
 }
 
     }
