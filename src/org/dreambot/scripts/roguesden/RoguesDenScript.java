@@ -145,7 +145,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleDoor() {
-        GameObject door = GameObjects.closest(o -> o.getName().equals("Door"));
+        GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
         if (door != null && door.interact("Open")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving(), 3000);
             step++;
@@ -153,20 +153,20 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleClimb() {
-        GameObject climb = GameObjects.closest(o -> o.hasAction("Climb"));
+        GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
         if (climb != null && climb.interact("Climb")) {
             Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
             step++;
         }
     }
 
-private void handleSqueeze() {
-    GameObject squeeze = GameObjects.closest(o -> o.hasAction("Squeeze"));
-    if (squeeze != null && squeeze.interact("Squeeze")) {
-        Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-        step++;
+    private void handleSqueeze() {
+        GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
+        if (squeeze != null && squeeze.interact("Squeeze")) {
+            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+            step++;
+        }
     }
-}
 
 private void recoverMaze() {
     log("Recovering maze...");
@@ -178,6 +178,7 @@ private void recoverMaze() {
 private void prepareSupplies() {
     int attempts = 0;
     try {
+        // Robustly open the nearest bank (up to 3 attempts)
         while (attempts < 3 && !getBank().isOpen()) {
             if (!getBank().openClosest()) {
                 log("Failed to open closest bank. Retrying...");
@@ -193,6 +194,7 @@ private void prepareSupplies() {
             return;
         }
 
+        // Coins (skip on ironman)
         if (!ironman && !Inventory.contains("Coins")) {
             if (getBank().withdrawAll("Coins")) {
                 Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
@@ -206,18 +208,32 @@ private void prepareSupplies() {
             log("Ironman account detected, skipping coin withdrawal.");
         }
 
-        if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            if (getBank().withdrawAll(i -> i.getName().contains("Stamina potion"))) {
-                Sleep.sleepUntil(
-                        () -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
-                if (!Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-                    log("Failed to withdraw stamina potions.");
+        // Stamina potions (if configured), with null-safe name checks
+        if (config.useStamina && !Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Stamina potion");
+        })) {
+            boolean withdrew = getBank().withdrawAll(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
+            if (withdrew) {
+                Sleep.sleepUntil(() -> Inventory.contains(i -> {
+                    String n = i.getName();
+                    return n != null && n.contains("Stamina potion");
+                }), 2000);
+                if (!Inventory.contains(i -> {
+                    String n = i.getName();
+                    return n != null && n.contains("Stamina potion");
+                })) {
+                    log("Failed to confirm stamina potions in inventory after withdrawal.");
                 }
             } else {
                 log("Bank failed to withdraw stamina potions.");
             }
         }
     } finally {
+        // Always try to close the bank
         if (getBank().isOpen()) {
             getBank().close();
             Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
