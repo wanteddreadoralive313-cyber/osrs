@@ -7,13 +7,96 @@ import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.interactive.GameObjects;
+import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
+// === Rogues' Den config & planning ===
+private static final String TOKEN_NAME = "Rogue's reward token";
+private static final String REWARD_NPC = "Rogue";
+private static final String[] GEAR_ITEMS = {
+    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+};
+
+private enum Interaction {
+    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
+}
+
+private static class MazeStep {
+    final Tile tile;
+    final Interaction interaction;
+    final String obstacle;
+
+    MazeStep(Tile tile, Interaction interaction, String obstacle) {
+        this.tile = tile;
+        this.interaction = interaction;
+        this.obstacle = obstacle;
+    }
+}
+
+private final MazeStep[] MAZE_PLAN = new MazeStep[] {
+    new MazeStep(new Tile(3047, 4973, 1), Interaction.OPEN, "Door"),
+    new MazeStep(new Tile(3048, 4970, 1), Interaction.CLIMB, "Rubble"),
+    new MazeStep(new Tile(3050, 4970, 1), Interaction.SQUEEZE, "Gap"),
+    new MazeStep(new Tile(3052, 4968, 1), Interaction.DISARM, "Trap"),
+    new MazeStep(new Tile(3054, 4968, 1), Interaction.SEARCH, "Crate")
+};
+
+// === Runtime state ===
+private int step = 0;
+private Config config = new Config();
+private RoguesDenGUI gui;
+private boolean ironman;
+private boolean suppliesReady;
+
+@Override
+public void onStart() {
+    log("Starting Rogues' Den script");
+    if (!meetsRequirements()) {
+        log("Account doesn't meet Rogues' Den requirements.");
+        ScriptManager.getScriptManager().stop();
+        return;
+    }
+    ironman = getClient().isIronMan();
+    SwingUtilities.invokeLater(() -> {
+        gui = new RoguesDenGUI(config, guiDone);
+        gui.setVisible(true);
+    });
+}
+
+private boolean meetsRequirements() {
+    return getSkills().getRealLevel(Skill.THIEVING) >= 50
+        && getSkills().getRealLevel(Skill.AGILITY) >= 50;
+}
+
+@Override
+public int onLoop() {
+    if (!guiDone.get()) return 600;
+
+    if (!suppliesReady) {
+        prepareSupplies();
+        suppliesReady = true;
+        return 600;
+    }
+
+    if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
+        getWalking().toggleRun(true);
+    }
+
+    AntiBan.permute(this, abc, config);
+
+    if (handleRewards()) {
+        // (continue with reward handling logic)
+    }
+
+    return 600;
+}
+
 import javax.swing.SwingUtilities;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
@@ -25,17 +108,56 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1); // approximate
     private final Tile START_TILE = new Tile(3047,4975,1);
-    private final Tile[] MAZE_STEPS = {
-            new Tile(3047,4973,1), // first door
-            new Tile(3048,4970,1), // climb obstacle
-            new Tile(3050,4970,1)  // squeeze obstacle
+private final Tile START_TILE = new Tile(3047,4975,1);
+
+// Simple waypoint list (kept for compatibility with existing pathing code)
+private final Tile[] MAZE_STEPS = {
+    new Tile(3047,4973,1),
+    new Tile(3048,4970,1),
+    new Tile(3050,4970,1),
+    new Tile(3052,4970,1)
+};
+
+// Reward/gear handling constants
+private static final String TOKEN_NAME = "Rogue's reward token";
+private static final String REWARD_NPC = "Rogue";
+private static final String[] GEAR_ITEMS = {
+    "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
+};
+
+// Rich interaction model for the maze (new functionality)
+private enum Interaction {
+    OPEN, CLIMB, SQUEEZE, SEARCH, DISARM
+}
+
+private static class MazeStep {
+    final Tile tile;
+    final Interaction interaction;
+    final String obstacle;
+
+    MazeStep(Tile tile, Interaction interaction, String obstacle) {
+        this.tile = tile;
+        this.interaction = interaction;
+        this.obstacle = obstacle;
+    }
+}
+
+private final MazeStep[] MAZE_PLAN = {
+    new MazeStep(new Tile(3047,4973,1), Interaction.OPEN, "Door"),
+    new MazeStep(new Tile(3048,4970,1), Interaction.CLIMB, "Rubble"),
+    new MazeStep(new Tile(3050,4970,1), Interaction.SQUEEZE, "Gap"),
+    new MazeStep(new Tile(3052,4968,1), Interaction.DISARM, "Trap"),
+    new MazeStep(new Tile(3054,4968,1), Interaction.SEARCH, "Crate")
+};
+
     };
     private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
-    private int failureCount = 0;
-    private Tile lastSafeTile = START_TILE;
+private int failureCount = 0;
+private Tile lastSafeTile = START_TILE;
+private boolean suppliesReady;
 
     @Override
     public void onStart() {
@@ -50,13 +172,6 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
         });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            prepareSupplies();
-        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -67,11 +182,21 @@ public class RoguesDenScript extends AbstractScript {
     public int onLoop() {
         if (!guiDone.get()) return 600;
 
+        if (!suppliesReady) {
+            prepareSupplies();
+            suppliesReady = true;
+            return 600;
+        }
+
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
         }
 
         AntiBan.permute(this, abc, config);
+
+        if (handleRewards()) {
+            return Calculations.random(600,900);
+        }
 
         State state = getState();
         switch (state) {
@@ -105,8 +230,17 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleRest() {
         log("Waiting for run energy...");
-        if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
+        if (config.useStamina && Inventory.contains(i -> {
+            String n = i.getName();
+            return n != null && n.contains("Stamina potion");
+        })) {
+            Item stamina = Inventory.get(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
+            if (stamina != null) {
+                stamina.interact("Drink");
+            }
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
         } else {
             Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
@@ -124,38 +258,59 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        Tile target = MAZE_STEPS[step];
+        MazeStep current = MAZE_STEPS[step];
+        Tile target = current.tile;
         if (getLocalPlayer().distance(target) > 2) {
             getWalking().walk(target);
             Sleep.sleepUntil(() -> getLocalPlayer().distance(target) <= 2, 5000);
             return;
         }
 
-        switch (step) {
-            case 0:
-                handleDoor();
+        switch (current.interaction) {
+            case OPEN:
+                handleOpen(current);
                 break;
-            case 1:
-                handleClimb();
+            case CLIMB:
+                handleClimb(current);
                 break;
-            case 2:
-                handleSqueeze();
+            case SQUEEZE:
+                handleSqueeze(current);
+                break;
+            case SEARCH:
+                handleSearch(current);
+                break;
+            case DISARM:
+                handleDisarm(current);
+                break;
+            case 3:
+                handleChest();
                 break;
             default:
                 step = 0;
         }
     }
 
-    private void handleDoor() {
-        GameObject door = GameObjects.closest(o -> o != null && "Door".equals(o.getName()));
-        if (door == null || !door.interact("Open")) {
-            obstacleFailed("Door", "interaction failed");
-            return;
-        }
-        Tile before = getLocalPlayer().getTile();
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
-            obstacleFailed("Door", "door didn't open");
-            return;
+private void handleOpen(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()));
+    if (obj == null || !obj.interact("Open")) {
+        obstacleFailed(s.obstacle, "interaction failed");
+        return;
+    }
+    Tile before = getLocalPlayer().getTile();
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed(s.obstacle, "no open animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed(s.obstacle, "position unchanged");
+        return;
+    }
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
         }
         Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
         if (getLocalPlayer().distance(before) <= 1) {
@@ -166,11 +321,27 @@ public class RoguesDenScript extends AbstractScript {
         lastSafeTile = getLocalPlayer().getTile();
     }
 
-    private void handleClimb() {
-        GameObject climb = GameObjects.closest(o -> o != null && o.hasAction("Climb"));
-        if (climb == null || !climb.interact("Climb")) {
-            obstacleFailed("Climb", "interaction failed");
-            return;
+private void handleClimb(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Climb"));
+    if (obj == null || !obj.interact("Climb")) {
+        obstacleFailed("Climb", "interaction failed");
+        return;
+    }
+    Tile before = getLocalPlayer().getTile();
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("Climb", "no climb animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed("Climb", "trap triggered");
+        return;
+    }
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
         }
         Tile before = getLocalPlayer().getTile();
         if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
@@ -186,44 +357,80 @@ public class RoguesDenScript extends AbstractScript {
         lastSafeTile = getLocalPlayer().getTile();
     }
 
-    private void handleSqueeze() {
-        GameObject squeeze = GameObjects.closest(o -> o != null && o.hasAction("Squeeze"));
-        if (squeeze == null || !squeeze.interact("Squeeze")) {
-            obstacleFailed("Squeeze", "interaction failed");
-            return;
-        }
-        Tile before = getLocalPlayer().getTile();
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-            obstacleFailed("Squeeze", "no squeeze animation");
-            return;
-        }
-        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-        if (getLocalPlayer().distance(before) <= 1) {
-            obstacleFailed("Squeeze", "trap triggered");
-            return;
-        }
-        step++;
-        lastSafeTile = getLocalPlayer().getTile();
+private void handleSqueeze(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null
+            && s.obstacle.equals(o.getName())
+            && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through")));
+    boolean ok = obj != null && (obj.hasAction("Squeeze") ? obj.interact("Squeeze") : obj.interact("Squeeze-through"));
+    if (!ok) {
+        obstacleFailed("SQUEEZE", "interaction failed");
+        return;
     }
+    Tile before = getLocalPlayer().getTile();
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("SQUEEZE", "no squeeze movement");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+    if (getLocalPlayer().distance(before) <= 1) {
+        obstacleFailed("SQUEEZE", "position unchanged");
+        return;
+    }
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
 
-    private void obstacleFailed(String obstacle, String reason) {
-        failureCount++;
-        log("Obstacle failed (" + obstacle + "): " + reason);
-        recoverToSafeTile();
+private void handleSearch(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Search"));
+    if (obj == null || !obj.interact("Search")) {
+        obstacleFailed("SEARCH", "interaction failed");
+        return;
     }
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("SEARCH", "no search animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
 
-    private void recoverToSafeTile() {
-        log("Recovering to safe tile...");
-        getWalking().walk(lastSafeTile);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
     }
+}
 
-    private void recoverMaze() {
-        log("Recovering maze...");
-        getWalking().walk(START_TILE);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
-        step = 0;
+private void handleDisarm(MazeStep s) {
+    GameObject obj = GameObjects.closest(o -> o != null && s.obstacle.equals(o.getName()) && o.hasAction("Disarm"));
+    if (obj == null || !obj.interact("Disarm")) {
+        obstacleFailed("DISARM", "interaction failed");
+        return;
     }
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
+        obstacleFailed("DISARM", "no disarm animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
+
+private void handleChest() {
+    GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
+    if (chest == null || !chest.interact("Open")) {
+        obstacleFailed("Chest", "interaction failed");
+        return;
+    }
+    if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating() || getLocalPlayer().isMoving(), 3000)) {
+        obstacleFailed("Chest", "no open animation");
+        return;
+    }
+    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating() && !getLocalPlayer().isMoving(), 5000);
+    step++;
+    lastSafeTile = getLocalPlayer().getTile();
+    AntiBan.sleepReaction(abc);
+}
 
     private void prepareSupplies() {
         int attempts = 0;
@@ -236,60 +443,120 @@ public class RoguesDenScript extends AbstractScript {
                 Sleep.sleep(600, 1200);
                 continue;
             }
-            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-        }
+            // Bank opened; proceed with supply logic below...
 
-        if (!getBank().isOpen()) {
-            log("Unable to open bank after multiple attempts. Aborting supply preparation.");
-            return;
-        }
-
-        // Coins (skip on ironman)
-        if (!ironman && !Inventory.contains("Coins")) {
-            if (getBank().withdrawAll("Coins")) {
-                Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
-                if (!Inventory.contains("Coins")) {
-                    log("Failed to withdraw coins.");
-                }
-            } else {
-                log("Bank failed to withdraw coins.");
             }
-        } else if (ironman) {
-            log("Ironman account detected, skipping coin withdrawal.");
+            attempts++;
         }
-
-        // Stamina potions (if configured), with null-safe name checks
-        if (config.useStamina && !Inventory.contains(i -> {
-            String n = i.getName();
-            return n != null && n.contains("Stamina potion");
-        })) {
-            boolean withdrew = getBank().withdrawAll(i -> {
-                String n = i.getName();
-                return n != null && n.contains("Stamina potion");
-            });
-            if (withdrew) {
-                Sleep.sleepUntil(() -> Inventory.contains(i -> {
-                    String n = i.getName();
-                    return n != null && n.contains("Stamina potion");
-                }), 2000);
-                if (!Inventory.contains(i -> {
-                    String n = i.getName();
-                    return n != null && n.contains("Stamina potion");
-                })) {
-                    log("Failed to confirm stamina potions in inventory after withdrawal.");
-                }
-            } else {
-                log("Bank failed to withdraw stamina potions.");
-            }
-        }
-    } finally {
-        // Always try to close the bank
-        if (getBank().isOpen()) {
-            getBank().close();
-            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        if (Inventory.contains(TOKEN_NAME)) {
+            step++;
+        } else {
+            log("Failed to obtain token from chest after multiple attempts.");
         }
     }
-}
+
+    private void recoverMaze() {
+        log("Recovering maze...");
+        getWalking().walk(START_TILE);
+        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+        step = 0;
+    }
+
+    private boolean handleRewards() {
+        if (Inventory.count(TOKEN_NAME) < 1) {
+            return false;
+        }
+        int attempts = 0;
+        while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
+            NPC npc = NPCs.closest(REWARD_NPC);
+            if (npc != null && npc.interact("Claim")) {
+                boolean success = Sleep.sleepUntil(() -> Inventory.contains(i -> isRogueGear(i.getName())), 5000);
+                if (success) {
+                    return true;
+                } else {
+                    log("No gear received, retrying...");
+                }
+            } else {
+                log("Failed to locate reward NPC.");
+            }
+            attempts++;
+            Sleep.sleep(600, 1200);
+        }
+        if (Inventory.count(TOKEN_NAME) >= 1) {
+            log("Failed to obtain gear after multiple attempts.");
+        }
+        return true;
+    }
+
+    private boolean isRogueGear(String name) {
+        return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
+    }
+
+    private void prepareSupplies() {
+        int attempts = 0;
+        try {
+            // Robustly open the nearest bank (up to 3 attempts)
+            while (attempts < 3 && !getBank().isOpen()) {
+                if (!getBank().openClosest()) {
+                    log("Failed to open closest bank. Retrying...");
+                    attempts++;
+                    Sleep.sleep(600, 1200);
+                    continue;
+                }
+                Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+            }
+
+            if (!getBank().isOpen()) {
+                log("Unable to open bank after multiple attempts. Aborting supply preparation.");
+                return;
+            }
+
+            // Coins (skip on ironman)
+            if (!ironman && !Inventory.contains("Coins")) {
+                if (getBank().withdrawAll("Coins")) {
+                    Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+                    if (!Inventory.contains("Coins")) {
+                        log("Failed to withdraw coins.");
+                    }
+                } else {
+                    log("Bank failed to withdraw coins.");
+                }
+            } else if (ironman) {
+                log("Ironman account detected, skipping coin withdrawal.");
+            }
+
+            // Stamina potions (if configured), with null-safe name checks
+            if (config.useStamina && !Inventory.contains(i -> {
+                String n = i.getName();
+                return n != null && n.contains("Stamina potion");
+            })) {
+                boolean withdrew = getBank().withdrawAll(i -> {
+                    String n = i.getName();
+                    return n != null && n.contains("Stamina potion");
+                });
+                if (withdrew) {
+                    Sleep.sleepUntil(() -> Inventory.contains(i -> {
+                        String n = i.getName();
+                        return n != null && n.contains("Stamina potion");
+                    }), 2000);
+                    if (!Inventory.contains(i -> {
+                        String n = i.getName();
+                        return n != null && n.contains("Stamina potion");
+                    })) {
+                        log("Failed to confirm stamina potions in inventory after withdrawal.");
+                    }
+                } else {
+                    log("Bank failed to withdraw stamina potions.");
+                }
+            }
+        } finally {
+            // Always try to close the bank
+            if (getBank().isOpen()) {
+                getBank().close();
+                Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+            }
+        }
+    }
 
     @Override
     public void onExit() {
