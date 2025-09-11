@@ -15,6 +15,7 @@ import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.methods.magic.Normal;
 import javax.swing.SwingUtilities;
 
 private static final String TOKEN_NAME = "Rogue's reward token";
@@ -164,8 +165,7 @@ private boolean suppliesReady;
         State state = getState();
         switch (state) {
             case TRAVEL:
-                getWalking().walk(START_TILE);
-                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
+                handleTravel();
                 return Calculations.random(300,600);
             case REST:
                 handleRest();
@@ -189,6 +189,39 @@ private boolean suppliesReady;
 
     private boolean needsRest() {
         return getWalking().getRunEnergy() < config.runThreshold;
+    }
+
+    private void handleTravel() {
+        if (DEN_AREA.contains(getLocalPlayer())) {
+            return;
+        }
+
+        int failures = 0;
+        while (!DEN_AREA.contains(getLocalPlayer())) {
+            // wait out any teleport animations
+            if (getLocalPlayer().isAnimating()) {
+                Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 15000);
+                continue;
+            }
+
+            // after several failed path attempts try teleporting
+            if (failures >= 3 && getMagic().canCast(Normal.HOME_TELEPORT)) {
+                log("Teleporting closer to the Rogues' Den...");
+                if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
+                    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 30000);
+                }
+                failures = 0;
+                continue;
+            }
+
+            if (!getWalking().walk(START_TILE)) {
+                failures++;
+                log("Failed to generate path to den (" + failures + ")");
+                Sleep.sleep(600, 900);
+            } else {
+                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()) || !getLocalPlayer().isMoving(), 15000);
+            }
+        }
     }
 
     private void handleRest() {
