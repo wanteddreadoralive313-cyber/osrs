@@ -171,27 +171,54 @@ private void recoverMaze() {
 }
 
 private void prepareSupplies() {
-    if (getBank().openClosest()) {
-        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+    int attempts = 0;
+    try {
+        while (attempts < 3 && !getBank().isOpen()) {
+            if (!getBank().openClosest()) {
+                log("Failed to open closest bank. Retrying...");
+                attempts++;
+                Sleep.sleep(600, 1200);
+                continue;
+            }
+            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+        }
+
+        if (!getBank().isOpen()) {
+            log("Unable to open bank after multiple attempts. Aborting supply preparation.");
+            return;
+        }
 
         if (!ironman && !Inventory.contains("Coins")) {
-            getBank().withdrawAll("Coins");
-            Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+            if (getBank().withdrawAll("Coins")) {
+                Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+                if (!Inventory.contains("Coins")) {
+                    log("Failed to withdraw coins.");
+                }
+            } else {
+                log("Bank failed to withdraw coins.");
+            }
         } else if (ironman) {
             log("Ironman account detected, skipping coin withdrawal.");
         }
 
         if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
-            Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+            if (getBank().withdrawAll(i -> i.getName().contains("Stamina potion"))) {
+                Sleep.sleepUntil(
+                        () -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+                if (!Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+                    log("Failed to withdraw stamina potions.");
+                }
+            } else {
+                log("Bank failed to withdraw stamina potions.");
+            }
         }
-
-        getBank().close();
-        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    } finally {
+        if (getBank().isOpen()) {
+            getBank().close();
+            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        }
     }
 }
-
-    }
 
     @Override
     public void onExit() {
