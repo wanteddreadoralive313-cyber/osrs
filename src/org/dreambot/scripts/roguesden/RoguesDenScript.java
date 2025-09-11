@@ -12,7 +12,6 @@ import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
-import org.dreambot.api.utilities.SleepUtil;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,6 +33,7 @@ public class RoguesDenScript extends AbstractScript {
     private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
+    private boolean ironman;
 
     @Override
     public void onStart() {
@@ -43,10 +43,18 @@ public class RoguesDenScript extends AbstractScript {
             ScriptManager.getScriptManager().stop();
             return;
         }
+        ironman = getClient().isIronMan();
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone);
             gui.setVisible(true);
         });
+
+        new Thread(() -> {
+            while (!guiDone.get()) {
+                Sleep.sleep(100);
+            }
+            prepareSupplies();
+        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -147,19 +155,42 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private void handleSqueeze() {
-        GameObject squeeze = GameObjects.closest(o -> o.hasAction("Squeeze"));
-        if (squeeze != null && squeeze.interact("Squeeze")) {
-            Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
-            step++;
-        }
+private void handleSqueeze() {
+    GameObject squeeze = GameObjects.closest(o -> o.hasAction("Squeeze"));
+    if (squeeze != null && squeeze.interact("Squeeze")) {
+        Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000);
+        step++;
     }
+}
 
-    private void recoverMaze() {
-        log("Recovering maze...");
-        getWalking().walk(START_TILE);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
-        step = 0;
+private void recoverMaze() {
+    log("Recovering maze...");
+    getWalking().walk(START_TILE);
+    Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+    step = 0;
+}
+
+private void prepareSupplies() {
+    if (getBank().openClosest()) {
+        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+
+        if (!ironman && !Inventory.contains("Coins")) {
+            getBank().withdrawAll("Coins");
+            Sleep.sleepUntil(() -> Inventory.contains("Coins"), 2000);
+        } else if (ironman) {
+            log("Ironman account detected, skipping coin withdrawal.");
+        }
+
+        if (config.useStamina && !Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
+            getBank().withdrawAll(i -> i.getName().contains("Stamina potion"));
+            Sleep.sleepUntil(() -> Inventory.contains(i -> i.getName().contains("Stamina potion")), 2000);
+        }
+
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+    }
+}
+
     }
 
     @Override
