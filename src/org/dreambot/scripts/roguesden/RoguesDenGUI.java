@@ -2,14 +2,26 @@ package org.dreambot.scripts.roguesden;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RoguesDenGUI extends JFrame {
 
-    public RoguesDenGUI(RoguesDenScript.Config config, AtomicBoolean done) {
+    public RoguesDenGUI(RoguesDenScript.Config config,
+                        AtomicBoolean done,
+                        AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
         setSize(280, 320);
         setLayout(new GridLayout(0, 1));
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                cancelled.set(true);
+                done.set(true);
+            }
+        });
 
         // Common checkboxes
         JCheckBox stamina = new JCheckBox("Use stamina potions", config.useStamina);
@@ -130,6 +142,7 @@ public class RoguesDenGUI extends JFrame {
             config.breakLengthMin = bLenMin;
             config.breakLengthMax = bLenMax;
 
+            cancelled.set(false);
             done.set(true);
             setVisible(false);
             dispose();
