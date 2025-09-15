@@ -67,6 +67,7 @@ public class RoguesDenScript extends AbstractScript {
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
+    private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
 
@@ -97,13 +98,18 @@ public class RoguesDenScript extends AbstractScript {
         abc.generateTrackers();
 
         SwingUtilities.invokeLater(() -> {
-            gui = new RoguesDenGUI(config, guiDone);
+            gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
         });
 
         new Thread(() -> {
             while (!guiDone.get()) {
                 Sleep.sleep(100);
+            }
+            if (guiCancelled.get()) {
+                log("GUI closed before start; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
             }
             if (!validateConfig(config)) {
                 log("Invalid configuration; stopping script.");
