@@ -16,6 +16,7 @@ import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.wrappers.items.GroundItem;
 import org.dreambot.api.wrappers.items.Item;
 
 import javax.swing.SwingUtilities;
@@ -37,32 +38,268 @@ public class RoguesDenScript extends AbstractScript {
 
     private static final int FAILURE_THRESHOLD = 3;
 
-    private static class MazeStep {
-        final Tile tile;
-        final String name;
-        final String action;
-        final Tile successTile;
-        final int animationId;
+    private enum InstructionType {
+        HINT,
+        MOVE,
+        INTERACT,
+        GROUND_ITEM,
+        STUN_GUARD,
+        SKIP
+    }
 
-        MazeStep(Tile tile, String name, String action) {
-            this(tile, name, action, null, -1);
-        }
+    private boolean isAtTile(Tile tile) {
+        return tile != null && getLocalPlayer().distance(tile) <= 1;
+    }
 
-        MazeStep(Tile tile, String name, String action, Tile successTile, int animationId) {
-            this.tile = tile;
-            this.name = name;
-            this.action = action;
-            this.successTile = successTile;
-            this.animationId = animationId;
+    private void markStepComplete() {
+        step++;
+        lastSafeTile = getLocalPlayer().getTile();
+        failureCount = 0;
+        AntiBan.sleepReaction(abc);
+    }
+
+    private void instructionFailed(String label, String reason) {
+        failureCount++;
+        log("Instruction " + label + " failed: " + reason);
+        if (failureCount > FAILURE_THRESHOLD) {
+            log("Failure threshold exceeded, returning to last safe tile");
+            if (lastSafeTile != null) {
+                getWalking().walk(lastSafeTile);
+                Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
+            }
+            failureCount = 0;
         }
     }
 
-    private final MazeStep[] MAZE_STEPS = new MazeStep[]{
-        new MazeStep(new Tile(3047,4973,1), "Door",   "Open"),
-        new MazeStep(new Tile(3048,4970,1), "Rubble", "Climb"),
-        new MazeStep(new Tile(3050,4970,1), "Gap",    "Squeeze-through"),
-        new MazeStep(new Tile(3052,4968,1), "Trap",   "Disarm"),
-        new MazeStep(new Tile(3054,4968,1), "Crate",  "Search")
+    private boolean hasAnyAction(GameObject obj, String[] actions) {
+        if (obj == null || actions == null) {
+            return false;
+        }
+        for (String action : actions) {
+            if (action != null && obj.hasAction(action)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String[] expandActions(MazeInstruction instruction) {
+        if (instruction.data == null) {
+            return new String[0];
+        }
+        switch (instruction.data) {
+            case "Climb":
+                return new String[]{"Climb", "Climb-over", "Climb-up", "Climb-down"};
+            case "Cross":
+                return new String[]{"Cross", "Cross-quickly", "Walk-across", "Walk-quickly", "Balance", "Jump-across"};
+            case "Walk-across":
+                return new String[]{"Walk-across", "Walk-quickly", "Cross"};
+            case "Open":
+                return new String[]{"Open", "Push-open"};
+            case "Enter":
+                return new String[]{"Enter", "Go-through", "Pass", "Walk-through"};
+            case "Search":
+                return new String[]{"Search", "Inspect"};
+            case "Crack":
+                return new String[]{"Crack", "Open"};
+            default:
+                return new String[]{instruction.data};
+        }
+    }
+
+    private void handleHint(MazeInstruction instruction) {
+        if ("(Drink potion)".equals(instruction.label) && config.useStamina) {
+            Item stamina = Inventory.get(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"));
+            if (stamina != null && stamina.interact("Drink")) {
+                Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
+            }
+        }
+    }
+
+    private void handleMoveInstruction(MazeInstruction instruction) {
+        if (isAtTile(instruction.tile)) {
+            markStepComplete();
+            return;
+        }
+
+        if (!getLocalPlayer().isMoving()) {
+            if (!getWalking().walk(instruction.tile)) {
+                instructionFailed(instruction.label, "could not path to tile");
+                return;
+            }
+        }
+
+        Sleep.sleepUntil(() -> isAtTile(instruction.tile) || !getLocalPlayer().isMoving(), 6000);
+        if (isAtTile(instruction.tile)) {
+            markStepComplete();
+        }
+    }
+
+    private void handleInteractInstruction(MazeInstruction instruction) {
+        String[] actions = expandActions(instruction);
+        GameObject obj = GameObjects.closest(o ->
+            o != null
+                && o.getTile() != null
+                && instruction.tile != null
+                && o.getTile().distance(instruction.tile) <= 3
+                && hasAnyAction(o, actions)
+        );
+
+        if (obj == null) {
+            instructionFailed(instruction.label, "object not found");
+            return;
+        }
+
+        boolean interacted = false;
+        for (String action : actions) {
+            if (action == null) continue;
+            if (obj.hasAction(action) && obj.interact(action)) {
+                interacted = true;
+                break;
+            }
+        }
+
+        if (!interacted) {
+            instructionFailed(instruction.label, "interaction failed");
+            return;
+        }
+
+        boolean started = Sleep.sleepUntil(
+            () -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating() || isAtTile(instruction.tile),
+            3000
+        );
+        if (!started) {
+            instructionFailed(instruction.label, "no movement/animation");
+            return;
+        }
+
+        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+        markStepComplete();
+    }
+
+    private void handleGroundItemInstruction(MazeInstruction instruction) {
+        if (instruction.data == null) {
+            markStepComplete();
+            return;
+        }
+
+        if (Inventory.contains(instruction.data)) {
+            markStepComplete();
+            return;
+        }
+
+        GroundItem item = getGroundItems().closest(g ->
+            g != null
+                && g.getTile() != null
+                && instruction.tile != null
+                && g.getTile().distance(instruction.tile) <= 4
+                && instruction.data.equalsIgnoreCase(g.getName())
+        );
+
+        if (item == null) {
+            instructionFailed(instruction.label, instruction.data + " not found");
+            return;
+        }
+
+        if (!item.interact("Take")) {
+            instructionFailed(instruction.label, "take failed");
+            return;
+        }
+
+        if (!Sleep.sleepUntil(() -> Inventory.contains(instruction.data), 3000)) {
+            instructionFailed(instruction.label, "item not picked up");
+            return;
+        }
+
+        markStepComplete();
+    }
+
+    private void handleGuardInstruction(MazeInstruction instruction) {
+        Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
+        if (powder == null) {
+            instructionFailed(instruction.label, "missing flash powder");
+            return;
+        }
+
+        NPC guard = NPCs.closest(n ->
+            n != null
+                && n.getName() != null
+                && n.getName().equalsIgnoreCase("Rogue guard")
+                && n.getTile() != null
+                && instruction.tile != null
+                && n.getTile().distance(instruction.tile) <= 5
+        );
+
+        if (guard == null) {
+            instructionFailed(instruction.label, "guard not found");
+            return;
+        }
+
+        if (!powder.useOn(guard)) {
+            instructionFailed(instruction.label, "failed to use flash powder");
+            return;
+        }
+
+        Sleep.sleep(600, 900);
+        markStepComplete();
+    }
+
+    private static class MazeInstruction {
+        final Tile tile;
+        final String label;
+        final InstructionType type;
+        final String data;
+
+        MazeInstruction(Tile tile, String label, InstructionType type, String data) {
+            this.tile = tile;
+            this.label = label;
+            this.type = type;
+            this.data = data;
+        }
+    }
+
+    private final MazeInstruction[] MAZE_PATH = new MazeInstruction[]{
+        new MazeInstruction(new Tile(3056, 4991, 1), "(Drink potion)", InstructionType.HINT, null),
+        new MazeInstruction(new Tile(3004, 5003, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2994, 5004, 1), "Climb", InstructionType.INTERACT, "Climb"),
+        new MazeInstruction(new Tile(2969, 5018, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2958, 5031, 1), "Cross", InstructionType.INTERACT, "Cross"),
+        new MazeInstruction(new Tile(2962, 5050, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
+        new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
+        new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
+        new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
+        new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
+        new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
+        new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
+        new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
+        new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
+        new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
+        new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
+        new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
+        new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
+        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
+        new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
+        new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
+        new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
+        new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
     };
 
     private final ABCUtil abc = new ABCUtil();
@@ -242,139 +479,33 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        if (step >= MAZE_STEPS.length) {
+        if (step >= MAZE_PATH.length) {
             handleChest();
             return;
         }
 
-        MazeStep current = MAZE_STEPS[step];
-        if (getLocalPlayer().distance(current.tile) > 2) {
-            getWalking().walk(current.tile);
-            Sleep.sleepUntil(() -> getLocalPlayer().distance(current.tile) <= 2, 5000);
-            return;
+        MazeInstruction current = MAZE_PATH[step];
+        switch (current.type) {
+            case SKIP:
+                step++;
+                break;
+            case HINT:
+                handleHint(current);
+                step++;
+                break;
+            case MOVE:
+                handleMoveInstruction(current);
+                break;
+            case INTERACT:
+                handleInteractInstruction(current);
+                break;
+            case GROUND_ITEM:
+                handleGroundItemInstruction(current);
+                break;
+            case STUN_GUARD:
+                handleGuardInstruction(current);
+                break;
         }
-        if ("Squeeze-through".equals(current.action) || "Squeeze".equals(current.action)) {
-            handleSqueeze(current);
-        } else if ("Search".equals(current.action)) {
-            handleSearch(current);
-        } else {
-            handleObstacle(current);
-        }
-    }
-
-    private void handleObstacle(MazeStep stepDef) {
-        if (stepDef == null || stepDef.name == null || stepDef.action == null) {
-            obstacleFailed(stepDef != null ? String.valueOf(stepDef.name) : "Unknown", "invalid MazeStep");
-            return;
-        }
-
-        GameObject obj = GameObjects.closest(o ->
-            o != null &&
-            stepDef.name.equals(o.getName()) &&
-            o.hasAction(stepDef.action)
-        );
-
-        if (obj == null) {
-            obstacleFailed(stepDef.name, "object not found");
-            return;
-        }
-
-        Tile before = getLocalPlayer().getTile();
-
-        if (!obj.interact(stepDef.action)) {
-            obstacleFailed(stepDef.name, "interaction failed");
-            return;
-        }
-
-        boolean started = Sleep.sleepUntil(
-            () -> getLocalPlayer().isMoving()
-               || getLocalPlayer().isAnimating()
-               || (stepDef.animationId != -1 && getLocalPlayer().getAnimation() == stepDef.animationId),
-            3000
-        );
-        if (!started) {
-            obstacleFailed(stepDef.name, "no " + stepDef.action.toLowerCase() + " animation/move");
-            return;
-        }
-
-        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
-
-        boolean moved = getLocalPlayer().distance(before) > 1;
-        boolean atSuccessTile = stepDef.successTile != null && getLocalPlayer().distance(stepDef.successTile) <= 1;
-
-        if (!moved && !atSuccessTile) {
-            obstacleFailed(stepDef.name, "position unchanged");
-            return;
-        }
-
-        step++;
-        lastSafeTile = getLocalPlayer().getTile();
-        failureCount = 0;
-        AntiBan.sleepReaction(abc);
-    }
-
-    private void handleSqueeze(MazeStep s) {
-        GameObject obj = GameObjects.closest(o ->
-            o != null
-            && s != null
-            && s.name.equals(o.getName())
-            && (o.hasAction("Squeeze") || o.hasAction("Squeeze-through"))
-        );
-
-        boolean ok = obj != null && (
-            obj.hasAction("Squeeze") ? obj.interact("Squeeze")
-                                     : obj.interact("Squeeze-through")
-        );
-
-        if (!ok) {
-            obstacleFailed(s != null ? s.name : "SQUEEZE", "interaction failed");
-            return;
-        }
-
-        Tile before = getLocalPlayer().getTile();
-
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating(), 3000)) {
-            obstacleFailed(s != null ? s.name : "SQUEEZE", "no squeeze movement");
-            return;
-        }
-
-        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
-
-        if (getLocalPlayer().distance(before) <= 1) {
-            obstacleFailed(s != null ? s.name : "SQUEEZE", "position unchanged");
-            return;
-        }
-
-        step++;
-        lastSafeTile = getLocalPlayer().getTile();
-        failureCount = 0;
-        AntiBan.sleepReaction(abc);
-    }
-
-    private void handleSearch(MazeStep s) {
-        GameObject obj = GameObjects.closest(o ->
-            o != null
-            && s != null
-            && s.name.equals(o.getName())
-            && o.hasAction("Search")
-        );
-
-        if (obj == null || !obj.interact("Search")) {
-            obstacleFailed(s != null ? s.name : "SEARCH", "interaction failed");
-            return;
-        }
-
-        if (!Sleep.sleepUntil(() -> getLocalPlayer().isAnimating(), 3000)) {
-            obstacleFailed(s != null ? s.name : "SEARCH", "no search animation");
-            return;
-        }
-
-        Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 5000);
-
-        step++;
-        lastSafeTile = getLocalPlayer().getTile();
-        failureCount = 0;
-        AntiBan.sleepReaction(abc);
     }
 
     private void handleChest() {
@@ -546,37 +677,38 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
-        // Handle stamina potion
-        Item stamina = Inventory.get(i -> {
-            String n = (i == null) ? null : i.getName();
-            return n != null && n.contains("Stamina potion");
-        });
+        if (config.useStamina) {
+            Item stamina = Inventory.get(i -> {
+                String n = (i == null) ? null : i.getName();
+                return n != null && n.contains("Stamina potion");
+            });
 
-        bankOpened = false;
-        if (stamina == null) {
-            if (!getBank().isOpen()) {
-                if (!getBank().openClosest()) {
-                    log("Could not open bank to withdraw supplies.");
-                    return false;
+            bankOpened = false;
+            if (stamina == null) {
+                if (!getBank().isOpen()) {
+                    if (!getBank().openClosest()) {
+                        log("Could not open bank to withdraw supplies.");
+                        return false;
+                    }
+                    Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+                    bankOpened = true;
                 }
-                Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-                bankOpened = true;
+
+                if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
+                    getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
+                    Sleep.sleepUntil(() ->
+                        Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion")),
+                        2000
+                    );
+                } else {
+                    log("No stamina potions available in bank.");
+                }
             }
 
-            if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
-                getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
-                Sleep.sleepUntil(() ->
-                    Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion")),
-                    2000
-                );
-            } else {
-                log("No stamina potions available in bank.");
+            if (bankOpened) {
+                getBank().close();
+                Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
             }
-        }
-
-        if (bankOpened) {
-            getBank().close();
-            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
 
         suppliesReady = true;
@@ -599,7 +731,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Runtime: " + formatTime(System.currentTimeMillis() - startTime), 10, y);
         y += 15;
-        g.drawString("Step: " + step + "/" + MAZE_STEPS.length, 10, y);
+        g.drawString("Step: " + step + "/" + MAZE_PATH.length, 10, y);
         y += 15;
         g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
         y += 15;
@@ -620,7 +752,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     int getMazeStepCount() {
-        return MAZE_STEPS.length;
+        return MAZE_PATH.length;
     }
 
     void incrementStep() {
