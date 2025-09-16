@@ -188,6 +188,17 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleGroundItemInstruction(MazeInstruction instruction) {
+        String targetName = instruction.data;
+        boolean needsPickup = targetName != null && !Inventory.contains(targetName);
+
+        if (Inventory.isFull() && needsPickup) {
+            if (!ensureInventorySpaceForGroundItem(targetName)) {
+                log("Inventory full and no safe item to drop for " + targetName + ". Aborting maze run.");
+                recoverMaze();
+                return;
+            }
+        }
+
         if (instruction.data == null) {
             markStepComplete();
             return;
@@ -195,6 +206,12 @@ public class RoguesDenScript extends AbstractScript {
 
         if (Inventory.contains(instruction.data)) {
             markStepComplete();
+            return;
+        }
+
+        if (Inventory.isFull()) {
+            log("Inventory still full before taking " + instruction.data + ". Aborting maze run.");
+            recoverMaze();
             return;
         }
 
@@ -222,6 +239,60 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         markStepComplete();
+    }
+
+    private boolean ensureInventorySpaceForGroundItem(String targetName) {
+        while (Inventory.isFull()) {
+            Item droppable = Inventory.get(i -> i != null && i.getName() != null && !isEssentialItem(i));
+            if (droppable == null) {
+                return false;
+            }
+
+            String dropName = droppable.getName();
+            int beforeCount = Inventory.count(dropName);
+            log("Dropping " + dropName + " to make space for " + targetName + ".");
+            if (!droppable.interact("Drop")) {
+                log("Failed to drop " + dropName + ".");
+                return false;
+            }
+
+            boolean spaceFreed = Sleep.sleepUntil(
+                () -> !Inventory.isFull() || Inventory.count(dropName) < beforeCount,
+                1500
+            );
+
+            if (!spaceFreed && Inventory.isFull()) {
+                log("Dropping " + dropName + " did not free inventory space.");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private boolean isEssentialItem(Item item) {
+        if (item == null) {
+            return false;
+        }
+
+        String name = item.getName();
+        if (name == null) {
+            return true;
+        }
+
+        if (TOKEN_NAME.equalsIgnoreCase(name)) {
+            return true;
+        }
+
+        if ("Flash powder".equalsIgnoreCase(name)) {
+            return true;
+        }
+
+        if (name.contains("Stamina potion")) {
+            return true;
+        }
+
+        return isRogueGear(name);
     }
 
     private void handleGuardInstruction(MazeInstruction instruction) {
