@@ -32,6 +32,7 @@ public class RoguesDenScript extends AbstractScript {
 
     private static final String TOKEN_NAME = "Rogue's reward token";
     private static final String REWARD_NPC = "Rogue";
+    private static final String FLASH_POWDER_NAME = "Flash powder";
     private static final String[] GEAR_ITEMS = {
         "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
     };
@@ -215,7 +216,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleGuardInstruction(MazeInstruction instruction) {
-        Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
+        Item powder = getFlashPowderItem();
         if (powder == null) {
             instructionFailed(instruction.label, "missing flash powder");
             return;
@@ -241,7 +242,62 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         Sleep.sleep(600, 900);
+        if (!hasFlashPowder()) {
+            log("Flash powder depleted after stunning guard; restocking before continuing.");
+            if (!backtrackToFlashPowderSpawn()) {
+                log("Unable to backtrack to flash powder spawn. Preparing supplies again.");
+                suppliesReady = false;
+                recoverMaze();
+            }
+            return;
+        }
+
         markStepComplete();
+    }
+
+    private Item getFlashPowderItem() {
+        return Inventory.get(i -> i != null && FLASH_POWDER_NAME.equalsIgnoreCase(i.getName()));
+    }
+
+    private boolean hasFlashPowder() {
+        return Inventory.contains(i -> i != null && FLASH_POWDER_NAME.equalsIgnoreCase(i.getName()));
+    }
+
+    private boolean backtrackToFlashPowderSpawn() {
+        int powderStepIndex = getFlashPowderStepIndex();
+        if (powderStepIndex < 0) {
+            return false;
+        }
+
+        MazeInstruction powderStep = MAZE_PATH[powderStepIndex];
+        Tile powderTile = powderStep.tile;
+        if (powderTile != null && getLocalPlayer() != null && getLocalPlayer().distance(powderTile) > 2) {
+            if (!getWalking().walk(powderTile)) {
+                log("Failed to walk back to flash powder spawn tile.");
+                return false;
+            }
+            Sleep.sleepUntil(() -> {
+                if (getLocalPlayer() == null) {
+                    return false;
+                }
+                return getLocalPlayer().distance(powderTile) <= 2 || !getLocalPlayer().isMoving();
+            }, 6000);
+        }
+
+        step = powderStepIndex;
+        return true;
+    }
+
+    private int getFlashPowderStepIndex() {
+        for (int i = 0; i < MAZE_PATH.length; i++) {
+            MazeInstruction instruction = MAZE_PATH[i];
+            if (instruction.type == InstructionType.GROUND_ITEM
+                && instruction.data != null
+                && FLASH_POWDER_NAME.equalsIgnoreCase(instruction.data)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static class MazeInstruction {
@@ -294,7 +350,7 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
         new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
         new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
+        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, FLASH_POWDER_NAME),
         new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
         new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
         new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
