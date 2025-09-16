@@ -769,10 +769,7 @@ public class RoguesDenScript extends AbstractScript {
         while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
             NPC npc = NPCs.closest(REWARD_NPC);
             if (npc != null && npc.interact("Claim")) {
-                boolean success = Sleep.sleepUntil(
-                    () -> Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName())),
-                    5000
-                );
+                boolean success = handleRewardDialogue();
                 if (success) {
                     if (hasFullRogueSet()) {
                         log("Full rogue set obtained. Stopping script.");
@@ -792,6 +789,59 @@ public class RoguesDenScript extends AbstractScript {
             log("Failed to obtain gear after multiple attempts.");
         }
         return true;
+    }
+
+    private boolean handleRewardDialogue() {
+        Sleep.sleepUntil(
+            () -> getDialogues().inDialogue()
+                || getDialogues().areOptionsAvailable()
+                || getDialogues().canContinue()
+                || getDialogues().isProcessing(),
+            3000
+        );
+
+        long timeout = System.currentTimeMillis() + 12000;
+        while (System.currentTimeMillis() < timeout) {
+            if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
+                return true;
+            }
+
+            boolean dialogueActive = getDialogues().inDialogue()
+                || getDialogues().areOptionsAvailable()
+                || getDialogues().canContinue()
+                || getDialogues().isProcessing();
+
+            if (!dialogueActive) {
+                break;
+            }
+
+            if (getDialogues().isProcessing()) {
+                Sleep.sleep(100, 200);
+                continue;
+            }
+
+            if (getDialogues().areOptionsAvailable()) {
+                if (getDialogues().chooseOption("Rogue equipment")
+                    || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
+                    Sleep.sleep(300, 600);
+                    continue;
+                }
+
+                if (getDialogues().chooseFirstOptionContaining("Yes", "Yes please", "Yes, please", "Sure")) {
+                    Sleep.sleep(300, 600);
+                    continue;
+                }
+            }
+
+            if (getDialogues().canContinue() && getDialogues().clickContinue()) {
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            Sleep.sleep(150, 300);
+        }
+
+        return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
     }
 
     private boolean isRogueGear(String name) {
