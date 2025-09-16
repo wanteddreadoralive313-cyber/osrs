@@ -55,7 +55,7 @@ public class RoguesDenScript extends AbstractScript {
         step++;
         lastSafeTile = getLocalPlayer().getTile();
         failureCount = 0;
-        AntiBan.sleepReaction(abc, config);
+        antiBan.sleepReaction(abc, config);
     }
 
     private void instructionFailed(String label, String reason) {
@@ -302,6 +302,7 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
     };
 
+    private final AntiBan antiBan = new AntiBan();
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
@@ -399,7 +400,7 @@ public class RoguesDenScript extends AbstractScript {
             getWalking().toggleRun(true);
         }
 
-        AntiBan.permute(this, abc, config);
+        antiBan.permute(this, abc, config);
 
         if (handleRewards()) {
             return Calculations.random(600, 900);
