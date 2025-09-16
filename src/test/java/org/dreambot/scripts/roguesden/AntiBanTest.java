@@ -95,5 +95,30 @@ class AntiBanTest {
 
         verify(abc).generateTrackers();
     }
+
+    @Test
+    void sleepReactionSkipsWhenAntiBanDisabled() {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.antiban = false;
+
+        ABCUtil abc = mock(ABCUtil.class);
+
+        AntiBan.sleepReaction(abc, cfg);
+
+        verify(abc, never()).generateReactionTime();
+    }
+
+    @Test
+    void sleepReactionUsesReactionWhenEnabled() {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.antiban = true;
+
+        ABCUtil abc = mock(ABCUtil.class);
+        when(abc.generateReactionTime()).thenReturn(0);
+
+        AntiBan.sleepReaction(abc, cfg);
+
+        verify(abc).generateReactionTime();
+    }
 }
 
