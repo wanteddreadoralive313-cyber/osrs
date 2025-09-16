@@ -640,28 +640,53 @@ public class RoguesDenScript extends AbstractScript {
 
         boolean bankOpened = false;
 
-        // Ensure all gear pieces are in inventory
-        for (String item : GEAR_ITEMS) {
-            if (!Inventory.contains(item)) {
-                if (!bankOpened) {
-                    if (!getBank().openClosest()) {
-                        log("Could not open bank to withdraw supplies.");
-                        return false;
-                    }
-                    Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-                    bankOpened = true;
-                }
+        if (!Inventory.isEmpty()) {
+            if (!openBank()) {
+                return false;
+            }
+            bankOpened = true;
+            getBank().depositAllItems();
+            if (!Sleep.sleepUntil(Inventory::isEmpty, 2000)) {
+                log("Unable to fully clear inventory; continuing with remaining items.");
+            }
+        }
 
-                if (getBank().contains(item)) {
-                    getBank().withdraw(item, 1);
-                    Sleep.sleepUntil(() -> Inventory.contains(item), 2000);
-                } else {
-                    log("Missing Rogue gear piece: " + item);
-                    if (bankOpened) {
-                        getBank().close();
-                        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
-                    }
+        for (String item : GEAR_ITEMS) {
+            if (isGearEquipped(item) || Inventory.contains(item)) {
+                continue;
+            }
+
+            if (!bankOpened && !openBank()) {
+                return false;
+            }
+
+            bankOpened = true;
+            if (!getBank().contains(item)) {
+                log("Missing Rogue gear piece: " + item);
+                closeBank();
+                return false;
+            }
+
+            getBank().withdraw(item, 1);
+            if (!Sleep.sleepUntil(() -> Inventory.contains(item), 2000)) {
+                log("Failed to withdraw " + item + ".");
+                closeBank();
+                return false;
+            }
+        }
+
+        if (config.useStamina) {
+            Item stamina = getStaminaPotion();
+            if (stamina == null) {
+                if (!bankOpened && !openBank()) {
                     return false;
+                }
+                bankOpened = true;
+                if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
+                    getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
+                    Sleep.sleepUntil(() -> Inventory.contains(this::isStaminaPotion), 2000);
+                } else {
+                    log("No stamina potions available in bank.");
                 }
             }
         }
@@ -671,56 +696,26 @@ public class RoguesDenScript extends AbstractScript {
                 getBank().depositAll("Vial");
                 Sleep.sleepUntil(() -> !Inventory.contains("Vial"), 2000);
             }
-            getBank().close();
-            Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+            closeBank();
         }
 
-        // Equip each gear piece
         for (String item : GEAR_ITEMS) {
+            if (isGearEquipped(item)) {
+                continue;
+            }
+
             Item gear = Inventory.get(item);
-            if (gear == null || !gear.interact("Wear")) {
+            if (gear == null) {
+                log("Failed to locate " + item + " in inventory for equipping.");
+                return false;
+            }
+            if (!gear.interact("Wear")) {
                 log("Failed to equip " + item);
                 return false;
             }
-            Sleep.sleepUntil(() -> !Inventory.contains(item), 2000);
-            if (!isGearEquipped(item)) {
+            if (!Sleep.sleepUntil(() -> isGearEquipped(item), 2000)) {
                 log("Could not confirm " + item + " equipped.");
                 return false;
-            }
-        }
-
-        if (config.useStamina) {
-            Item stamina = getStaminaPotion();
-
-            bankOpened = false;
-            if (stamina == null) {
-                if (!getBank().isOpen()) {
-                    if (!getBank().openClosest()) {
-                        log("Could not open bank to withdraw supplies.");
-                        return false;
-                    }
-                    Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-                    bankOpened = true;
-                }
-
-                if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
-                    getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
-                    Sleep.sleepUntil(() ->
-                        Inventory.contains(this::isStaminaPotion),
-                        2000
-                    );
-                } else {
-                    log("No stamina potions available in bank.");
-                }
-            }
-
-            if (bankOpened) {
-                if (Inventory.contains("Vial")) {
-                    getBank().depositAll("Vial");
-                    Sleep.sleepUntil(() -> !Inventory.contains("Vial"), 2000);
-                }
-                getBank().close();
-                Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
             }
         }
 
@@ -729,6 +724,29 @@ public class RoguesDenScript extends AbstractScript {
             log("Supply verification failed, will retry.");
         }
         return suppliesReady;
+    }
+
+    private boolean openBank() {
+        if (getBank().isOpen()) {
+            return true;
+        }
+        if (!getBank().openClosest()) {
+            log("Could not open bank to withdraw supplies.");
+            return false;
+        }
+        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
+            log("Timed out waiting for bank to open.");
+            return false;
+        }
+        return true;
+    }
+
+    private void closeBank() {
+        if (!getBank().isOpen()) {
+            return;
+        }
+        getBank().close();
+        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
     }
 
     @Override
