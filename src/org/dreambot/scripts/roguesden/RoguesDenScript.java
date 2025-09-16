@@ -55,7 +55,7 @@ public class RoguesDenScript extends AbstractScript {
         step++;
         lastSafeTile = getLocalPlayer().getTile();
         failureCount = 0;
-        AntiBan.sleepReaction(abc);
+        AntiBan.sleepReaction(abc, config);
     }
 
     private void instructionFailed(String label, String reason) {

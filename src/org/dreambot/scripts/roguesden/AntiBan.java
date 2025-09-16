@@ -116,7 +116,10 @@ public class AntiBan {
         abc.generateTrackers();
     }
 
-    public static void sleepReaction(ABCUtil abc) {
+    public static void sleepReaction(ABCUtil abc, RoguesDenScript.Config config) {
+        if (config == null || !config.antiban) {
+            return;
+        }
         Sleep.sleep(abc.generateReactionTime());
     }
 }
