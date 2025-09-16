@@ -568,6 +568,10 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean handleRewards() {
+        return handleRewards(false);
+    }
+
+    private boolean handleRewards(boolean retriedAfterDelay) {
         if (Inventory.count(TOKEN_NAME) < 1) {
             return false;
         }
@@ -596,8 +600,64 @@ public class RoguesDenScript extends AbstractScript {
         }
         if (Inventory.count(TOKEN_NAME) >= 1) {
             log("Failed to obtain gear after multiple attempts.");
+            boolean tokensCleared = disposeTokens();
+            if (!tokensCleared && !retriedAfterDelay && Inventory.count(TOKEN_NAME) >= 1) {
+                log("Retrying claim after short delay...");
+                Sleep.sleep(1200, 1800);
+                return handleRewards(true);
+            }
+            if (tokensCleared) {
+                Sleep.sleep(600, 900);
+            }
         }
         return true;
+    }
+
+    private boolean disposeTokens() {
+        if (!Inventory.contains(TOKEN_NAME)) {
+            return true;
+        }
+
+        log("Attempting to remove remaining rogue tokens...");
+        boolean tokensRemoved = false;
+        boolean bankAccessed = false;
+
+        if (getBank().isOpen()) {
+            bankAccessed = true;
+        } else if (openBank()) {
+            bankAccessed = getBank().isOpen();
+        }
+
+        if (bankAccessed && getBank().isOpen()) {
+            getBank().depositAll(TOKEN_NAME);
+            Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 2000);
+            tokensRemoved = !Inventory.contains(TOKEN_NAME);
+        }
+
+        if (bankAccessed) {
+            closeBank();
+        }
+
+        if (!tokensRemoved && Inventory.contains(TOKEN_NAME)) {
+            log("Depositing tokens failed, dropping them instead.");
+            while (Inventory.contains(TOKEN_NAME)) {
+                int before = Inventory.count(TOKEN_NAME);
+                Item token = Inventory.get(TOKEN_NAME);
+                if (token == null || !token.interact("Drop")) {
+                    log("Failed to drop a rogue token.");
+                    break;
+                }
+                Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) < before, 1500);
+            }
+            tokensRemoved = !Inventory.contains(TOKEN_NAME);
+        }
+
+        if (tokensRemoved) {
+            log("Remaining rogue tokens cleared.");
+        } else {
+            log("Unable to clear rogue tokens from inventory.");
+        }
+        return tokensRemoved;
     }
 
     private boolean isRogueGear(String name) {
