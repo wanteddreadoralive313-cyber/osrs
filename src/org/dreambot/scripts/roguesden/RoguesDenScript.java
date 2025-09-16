@@ -340,6 +340,7 @@ public class RoguesDenScript extends AbstractScript {
     private RoguesDenGUI gui;
     private boolean ironman;
     private boolean suppliesReady;
+    private boolean postGuiInitializationComplete;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
@@ -365,23 +366,6 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
         });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            if (guiCancelled.get()) {
-                log("GUI closed before start; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            if (!validateConfig(config)) {
-                log("Invalid configuration; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            prepareSupplies();
-        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -409,7 +393,26 @@ public class RoguesDenScript extends AbstractScript {
 
     @Override
     public int onLoop() {
-        if (!guiDone.get()) return 600;
+        if (!guiDone.get()) {
+            return 600;
+        }
+
+        if (guiCancelled.get()) {
+            log("GUI closed before start; stopping script.");
+            ScriptManager.getScriptManager().stop();
+            return 0;
+        }
+
+        if (!postGuiInitializationComplete) {
+            if (!validateConfig(config)) {
+                log("Invalid configuration; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return 0;
+            }
+            suppliesReady = prepareSupplies();
+            postGuiInitializationComplete = true;
+            return 600;
+        }
 
         if (!suppliesReady) {
             suppliesReady = prepareSupplies();
