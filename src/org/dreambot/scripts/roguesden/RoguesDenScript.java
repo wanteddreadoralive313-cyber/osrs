@@ -307,6 +307,7 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
+    private final Tile CHEST_TILE = new Tile(3046,4976,1);
 
     private int step = 0;
     private Config config = new Config();
@@ -523,9 +524,27 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
+        GameObject chest = GameObjects.closest(o ->
+            o != null
+                && "Chest".equals(o.getName())
+                && o.getTile() != null
+                && o.getTile().equals(CHEST_TILE)
+        );
         if (chest == null) {
             log("Reward chest not found.");
+            step = 0;
+            return;
+        }
+
+        Tile chestTile = chest.getTile();
+        if (chestTile == null) {
+            log("Reward chest tile unknown.");
+            step = 0;
+            return;
+        }
+
+        if (!getMap().canReach(chestTile)) {
+            log("Reward chest is not reachable.");
             step = 0;
             return;
         }
