@@ -22,6 +22,11 @@ import org.dreambot.api.wrappers.items.Item;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -258,49 +263,59 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private final MazeInstruction[] MAZE_PATH = new MazeInstruction[]{
-        new MazeInstruction(new Tile(3056, 4991, 1), "(Drink potion)", InstructionType.HINT, null),
-        new MazeInstruction(new Tile(3004, 5003, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2994, 5004, 1), "Climb", InstructionType.INTERACT, "Climb"),
-        new MazeInstruction(new Tile(2969, 5018, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2958, 5031, 1), "Cross", InstructionType.INTERACT, "Cross"),
-        new MazeInstruction(new Tile(2962, 5050, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
-        new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
-        new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
-        new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
-        new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
-    };
+    private static final MazeInstruction[] MAZE_PATH = loadMazePath();
+
+    private static MazeInstruction[] loadMazePath() {
+        List<MazeInstruction> instructions = new ArrayList<>();
+
+        try (InputStream input = RoguesDenScript.class.getResourceAsStream("maze_path.csv")) {
+            if (input == null) {
+                throw new IllegalStateException("Maze path configuration not found: maze_path.csv");
+            }
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                String line;
+                int lineNumber = 0;
+                while ((line = reader.readLine()) != null) {
+                    lineNumber++;
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+
+                    String[] parts = line.split("\\|", -1);
+                    if (parts.length < 4) {
+                        throw new IllegalStateException("Invalid maze instruction at line " + lineNumber);
+                    }
+
+                    String[] coords = parts[0].split(",");
+                    if (coords.length != 3) {
+                        throw new IllegalStateException("Invalid coordinates at line " + lineNumber);
+                    }
+
+                    int x = Integer.parseInt(coords[0].trim());
+                    int y = Integer.parseInt(coords[1].trim());
+                    int z = Integer.parseInt(coords[2].trim());
+                    String label = parts[1].trim();
+                    InstructionType type = InstructionType.valueOf(parts[2].trim());
+                    String data = parts[3].trim();
+                    if (data.isEmpty()) {
+                        data = null;
+                    }
+
+                    instructions.add(new MazeInstruction(new Tile(x, y, z), label, type, data));
+                }
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new IllegalStateException("Failed to load maze path configuration", e);
+        }
+
+        if (instructions.isEmpty()) {
+            throw new IllegalStateException("Maze path configuration is empty");
+        }
+
+        return instructions.toArray(new MazeInstruction[0]);
+    }
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
