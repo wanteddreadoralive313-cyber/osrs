@@ -25,6 +25,8 @@ import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
@@ -214,14 +216,34 @@ public class RoguesDenScript extends AbstractScript {
         markStepComplete();
     }
 
-    private void handleGuardInstruction(MazeInstruction instruction) {
-        Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
-        if (powder == null) {
-            instructionFailed(instruction.label, "missing flash powder");
-            return;
+    private boolean isGuardStunned(NPC guard) {
+        if (guard == null) {
+            return false;
         }
 
-        NPC guard = NPCs.closest(n ->
+        if (guard.isAnimating()) {
+            return true;
+        }
+
+        String name = guard.getName();
+        if (name != null && name.toLowerCase(Locale.ENGLISH).contains("stun")) {
+            return true;
+        }
+
+        String[] actions = guard.getActions();
+        if (actions != null) {
+            for (String action : actions) {
+                if (action != null && action.toLowerCase(Locale.ENGLISH).contains("stun")) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void handleGuardInstruction(MazeInstruction instruction) {
+        Supplier<NPC> guardSupplier = () -> NPCs.closest(n ->
             n != null
                 && n.getName() != null
                 && n.getName().equalsIgnoreCase("Rogue guard")
@@ -230,18 +252,56 @@ public class RoguesDenScript extends AbstractScript {
                 && n.getTile().distance(instruction.tile) <= 5
         );
 
+        NPC guard = guardSupplier.get();
+
         if (guard == null) {
             instructionFailed(instruction.label, "guard not found");
             return;
         }
 
-        if (!powder.useOn(guard)) {
-            instructionFailed(instruction.label, "failed to use flash powder");
-            return;
+        int attempts = 0;
+        while (attempts < 2) {
+            Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
+            if (powder == null) {
+                if (attempts == 0) {
+                    instructionFailed(instruction.label, "missing flash powder");
+                    return;
+                }
+                log("No flash powder remaining for additional attempts.");
+                break;
+            }
+
+            if (!powder.useOn(guard)) {
+                instructionFailed(instruction.label, "failed to use flash powder");
+                return;
+            }
+
+            attempts++;
+
+            boolean stunned = Sleep.sleepUntil(() -> {
+                NPC current = guardSupplier.get();
+                return current == null || isGuardStunned(current);
+            }, Calculations.random(1600, 2200));
+
+            NPC currentGuard = guardSupplier.get();
+
+            if (stunned || currentGuard == null || isGuardStunned(currentGuard)) {
+                Sleep.sleep(600, 900);
+                markStepComplete();
+                return;
+            }
+
+            log("Flash powder attempt " + attempts + " failed to stun the guard, retrying.");
+            guard = currentGuard;
+            Sleep.sleep(300, 600);
         }
 
-        Sleep.sleep(600, 900);
-        markStepComplete();
+        log("Guard remained active after flash powder attempts, retreating to last safe tile.");
+        if (lastSafeTile != null) {
+            getWalking().walk(lastSafeTile);
+            Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
+        }
+        instructionFailed(instruction.label, "guard not stunned");
     }
 
     private static class MazeInstruction {
