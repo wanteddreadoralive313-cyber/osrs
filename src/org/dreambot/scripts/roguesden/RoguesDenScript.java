@@ -2,12 +2,17 @@ package org.dreambot.scripts.roguesden;
 
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.methods.container.impl.equipment.Equipment;
+import org.dreambot.api.methods.container.impl.equipment.EquipmentSlot;
+import org.dreambot.api.methods.dialogues.Dialogues;
 import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.magic.Normal;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
+import org.dreambot.api.methods.tabs.Tab;
+import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManager;
@@ -16,6 +21,7 @@ import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.wrappers.interactive.Player;
 import org.dreambot.api.wrappers.items.GroundItem;
 import org.dreambot.api.wrappers.items.Item;
 
@@ -37,6 +43,10 @@ public class RoguesDenScript extends AbstractScript {
     };
 
     private static final int FAILURE_THRESHOLD = 3;
+
+    private static final long MAX_TRAVEL_TIME_MS = 120_000L;
+    private static final int MAX_TRAVEL_PATH_FAILURES = 6;
+    private static final int MAX_TRAVEL_RECOVERIES = 3;
 
     private enum InstructionType {
         HINT,
@@ -178,6 +188,17 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleGroundItemInstruction(MazeInstruction instruction) {
+        String targetName = instruction.data;
+        boolean needsPickup = targetName != null && !Inventory.contains(targetName);
+
+        if (Inventory.isFull() && needsPickup) {
+            if (!ensureInventorySpaceForGroundItem(targetName)) {
+                log("Inventory full and no safe item to drop for " + targetName + ". Aborting maze run.");
+                recoverMaze();
+                return;
+            }
+        }
+
         if (instruction.data == null) {
             markStepComplete();
             return;
@@ -185,6 +206,12 @@ public class RoguesDenScript extends AbstractScript {
 
         if (Inventory.contains(instruction.data)) {
             markStepComplete();
+            return;
+        }
+
+        if (Inventory.isFull()) {
+            log("Inventory still full before taking " + instruction.data + ". Aborting maze run.");
+            recoverMaze();
             return;
         }
 
@@ -212,6 +239,60 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         markStepComplete();
+    }
+
+    private boolean ensureInventorySpaceForGroundItem(String targetName) {
+        while (Inventory.isFull()) {
+            Item droppable = Inventory.get(i -> i != null && i.getName() != null && !isEssentialItem(i));
+            if (droppable == null) {
+                return false;
+            }
+
+            String dropName = droppable.getName();
+            int beforeCount = Inventory.count(dropName);
+            log("Dropping " + dropName + " to make space for " + targetName + ".");
+            if (!droppable.interact("Drop")) {
+                log("Failed to drop " + dropName + ".");
+                return false;
+            }
+
+            boolean spaceFreed = Sleep.sleepUntil(
+                () -> !Inventory.isFull() || Inventory.count(dropName) < beforeCount,
+                1500
+            );
+
+            if (!spaceFreed && Inventory.isFull()) {
+                log("Dropping " + dropName + " did not free inventory space.");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private boolean isEssentialItem(Item item) {
+        if (item == null) {
+            return false;
+        }
+
+        String name = item.getName();
+        if (name == null) {
+            return true;
+        }
+
+        if (TOKEN_NAME.equalsIgnoreCase(name)) {
+            return true;
+        }
+
+        if ("Flash powder".equalsIgnoreCase(name)) {
+            return true;
+        }
+
+        if (name.contains("Stamina potion")) {
+            return true;
+        }
+
+        return isRogueGear(name);
     }
 
     private void handleGuardInstruction(MazeInstruction instruction) {
@@ -255,6 +336,18 @@ public class RoguesDenScript extends AbstractScript {
             this.label = label;
             this.type = type;
             this.data = data;
+        }
+    }
+
+    private static class TeleportOption {
+        final String keyword;
+        final String dialogueOption;
+        final EquipmentSlot[] slots;
+
+        TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+            this.keyword = keyword;
+            this.dialogueOption = dialogueOption;
+            this.slots = slots;
         }
     }
 
@@ -302,17 +395,24 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
     };
 
+    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
+        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
+        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
+    };
+
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
+    private final Tile CHEST_TILE = new Tile(3046,4976,1);
 
     private int step = 0;
     private Config config = new Config();
     private RoguesDenGUI gui;
     private boolean ironman;
     private boolean suppliesReady;
+    private boolean postGuiInitializationComplete;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
@@ -338,23 +438,6 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
         });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            if (guiCancelled.get()) {
-                log("GUI closed before start; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            if (!validateConfig(config)) {
-                log("Invalid configuration; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            prepareSupplies();
-        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -382,7 +465,26 @@ public class RoguesDenScript extends AbstractScript {
 
     @Override
     public int onLoop() {
-        if (!guiDone.get()) return 600;
+        if (!guiDone.get()) {
+            return 600;
+        }
+
+        if (guiCancelled.get()) {
+            log("GUI closed before start; stopping script.");
+            ScriptManager.getScriptManager().stop();
+            return 0;
+        }
+
+        if (!postGuiInitializationComplete) {
+            if (!validateConfig(config)) {
+                log("Invalid configuration; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return 0;
+            }
+            suppliesReady = prepareSupplies();
+            postGuiInitializationComplete = true;
+            return 600;
+        }
 
         if (!suppliesReady) {
             suppliesReady = prepareSupplies();
@@ -443,30 +545,194 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        int failures = 0;
-        while (!DEN_AREA.contains(getLocalPlayer())) {
+        Tile lastPosition = getLocalPlayer() != null ? getLocalPlayer().getTile() : null;
+        long lastProgressTime = System.currentTimeMillis();
+        int pathFailures = 0;
+        int recoveryAttempts = 0;
+
+        while (true) {
+            if (getLocalPlayer() != null && DEN_AREA.contains(getLocalPlayer())) {
+                return;
+            }
+
+            if (getLocalPlayer() == null) {
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            Tile currentTile = getLocalPlayer().getTile();
+            if (currentTile != null && (lastPosition == null || !currentTile.equals(lastPosition))) {
+                lastPosition = currentTile;
+                lastProgressTime = System.currentTimeMillis();
+            }
+
+            long elapsed = System.currentTimeMillis() - lastProgressTime;
+            boolean timeExceeded = elapsed > MAX_TRAVEL_TIME_MS;
+            boolean failuresExceeded = pathFailures >= MAX_TRAVEL_PATH_FAILURES;
+
+            if (timeExceeded || failuresExceeded) {
+                recoveryAttempts++;
+                log("Travel to Rogues' Den exceeded limits (failures=" + pathFailures + ", elapsed=" + elapsed + " ms). Recovery attempt " + recoveryAttempts + ".");
+                if (recoveryAttempts > MAX_TRAVEL_RECOVERIES || !attemptTravelRecovery()) {
+                    stopScriptWithMessage("Unable to reach the Rogues' Den after " + recoveryAttempts + " recovery attempts.");
+                    return;
+                }
+
+                lastProgressTime = System.currentTimeMillis();
+                lastPosition = getLocalPlayer().getTile();
+                pathFailures = 0;
+                continue;
+            }
+
             if (getLocalPlayer().isAnimating()) {
                 Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 15000);
                 continue;
             }
 
-            if (failures >= 3 && getMagic().canCast(Normal.HOME_TELEPORT)) {
-                log("Teleporting closer to the Rogues' Den...");
-                if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
-                    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 30000);
-                }
-                failures = 0;
+            if (getLocalPlayer().isMoving()) {
+                Sleep.sleep(200, 300);
                 continue;
             }
 
             if (!getWalking().walk(START_TILE)) {
-                failures++;
-                log("Failed to generate path to den (" + failures + ")");
+                pathFailures++;
+                log("Failed to generate path to den (" + pathFailures + ")");
                 Sleep.sleep(600, 900);
-            } else {
-                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()) || !getLocalPlayer().isMoving(), 15000);
+                continue;
+            }
+
+            Sleep.sleepUntil(() -> {
+                Player player = getLocalPlayer();
+                return player != null && (DEN_AREA.contains(player) || player.isMoving());
+            }, 15000);
+            Player movingPlayer = getLocalPlayer();
+            if (movingPlayer != null && movingPlayer.isMoving()) {
+                lastProgressTime = System.currentTimeMillis();
+            }
+            pathFailures = 0;
+        }
+    }
+
+    private boolean attemptTravelRecovery() {
+        log("Initiating travel recovery; attempting to teleport closer to the Rogues' Den.");
+        if (!attemptTeleportToDen()) {
+            log("No valid teleport options available for travel recovery.");
+            return false;
+        }
+
+        Sleep.sleepUntil(() -> {
+            Player player = getLocalPlayer();
+            return player != null && (DEN_AREA.contains(player) || !player.isAnimating());
+        }, 20000);
+        return true;
+    }
+
+    private boolean attemptTeleportToDen() {
+        if (DEN_AREA.contains(getLocalPlayer())) {
+            return true;
+        }
+
+        for (TeleportOption option : TELEPORT_OPTIONS) {
+            if (attemptTeleportWithOption(option)) {
+                return true;
             }
         }
+
+        if (getMagic().canCast(Normal.HOME_TELEPORT)) {
+            log("Travel recovery: casting Home Teleport.");
+            if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
+                waitForTeleport();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean attemptTeleportWithOption(TeleportOption option) {
+        if (option == null) {
+            return false;
+        }
+
+        Item inventoryItem = Inventory.get(item -> matchesTeleportOption(item, option));
+        if (inventoryItem != null && useTeleportItem(inventoryItem, option.dialogueOption, Tab.INVENTORY)) {
+            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + option.dialogueOption + ".");
+            return true;
+        }
+
+        if (option.slots != null) {
+            for (EquipmentSlot slot : option.slots) {
+                if (slot == null) {
+                    continue;
+                }
+                Item equipped = Equipment.getItemInSlot(slot);
+                if (equipped != null && useTeleportItem(equipped, option.dialogueOption, Tab.EQUIPMENT)) {
+                    log("Travel recovery: used " + equipped.getName() + " to teleport to " + option.dialogueOption + ".");
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean useTeleportItem(Item item, String destination, Tab tab) {
+        if (item == null || destination == null) {
+            return false;
+        }
+
+        if (!Tabs.isOpen(tab)) {
+            if (!Tabs.open(tab)) {
+                log("Failed to open " + tab + " tab to use " + item.getName() + ".");
+                return false;
+            }
+            Sleep.sleepUntil(() -> Tabs.isOpen(tab), 1200);
+        }
+
+        if (item.hasAction(destination) && item.interact(destination)) {
+            waitForTeleport();
+            return true;
+        }
+
+        if (item.hasAction("Teleport") && item.interact("Teleport")) {
+            waitForTeleport();
+            return true;
+        }
+
+        if (item.hasAction("Rub") && item.interact("Rub")) {
+            if (!Sleep.sleepUntil(Dialogues::areOptionsAvailable, 3000)) {
+                log("Teleport options did not appear after rubbing " + item.getName() + ".");
+                return false;
+            }
+            if (!Dialogues.chooseOption(destination)) {
+                log("Failed to choose teleport option \"" + destination + "\" for " + item.getName() + ".");
+                return false;
+            }
+            Sleep.sleepUntil(() -> !Dialogues.inDialogue(), 2000);
+            waitForTeleport();
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean matchesTeleportOption(Item item, TeleportOption option) {
+        return item != null
+            && item.getName() != null
+            && option != null
+            && item.getName().toLowerCase().contains(option.keyword.toLowerCase());
+    }
+
+    private boolean waitForTeleport() {
+        Sleep.sleepUntil(() -> getLocalPlayer() != null && (getLocalPlayer().isAnimating() || getLocalPlayer().isMoving()), 5000);
+        Sleep.sleepUntil(() -> getLocalPlayer() != null && !getLocalPlayer().isAnimating(), 30000);
+        Sleep.sleep(600, 900);
+        return true;
+    }
+
+    private void stopScriptWithMessage(String message) {
+        log(message);
+        ScriptManager.getScriptManager().stop();
     }
 
     private void handleRest() {
@@ -523,9 +789,27 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        GameObject chest = GameObjects.closest(o -> o != null && "Chest".equals(o.getName()));
+        GameObject chest = GameObjects.closest(o ->
+            o != null
+                && "Chest".equals(o.getName())
+                && o.getTile() != null
+                && o.getTile().equals(CHEST_TILE)
+        );
         if (chest == null) {
             log("Reward chest not found.");
+            step = 0;
+            return;
+        }
+
+        Tile chestTile = chest.getTile();
+        if (chestTile == null) {
+            log("Reward chest tile unknown.");
+            step = 0;
+            return;
+        }
+
+        if (!getMap().canReach(chestTile)) {
+            log("Reward chest is not reachable.");
             step = 0;
             return;
         }
@@ -579,10 +863,7 @@ public class RoguesDenScript extends AbstractScript {
         while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
             NPC npc = NPCs.closest(REWARD_NPC);
             if (npc != null && npc.interact("Claim")) {
-                boolean success = Sleep.sleepUntil(
-                    () -> Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName())),
-                    5000
-                );
+                boolean success = handleRewardDialogue();
                 if (success) {
                     if (hasFullRogueSet()) {
                         log("Full rogue set obtained. Stopping script.");
@@ -612,52 +893,87 @@ public class RoguesDenScript extends AbstractScript {
         }
         return true;
     }
+// Wait for any dialogue state to appear
+Sleep.sleepUntil(() -> getDialogues().inDialogue()
+        || getDialogues().areOptionsAvailable()
+        || getDialogues().canContinue()
+        || getDialogues().isProcessing(),
+    3000
+);
 
-    private boolean disposeTokens() {
-        if (!Inventory.contains(TOKEN_NAME)) {
-            return true;
+// Drive the dialogue to obtain Rogue equipment (timeout ~12s)
+long timeout = System.currentTimeMillis() + 12000;
+while (System.currentTimeMillis() < timeout) {
+    if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
+        return true;
+    }
+
+    boolean dialogueActive = getDialogues().inDialogue()
+            || getDialogues().areOptionsAvailable()
+            || getDialogues().canContinue()
+            || getDialogues().isProcessing();
+
+    if (!dialogueActive) {
+        break;
+    }
+
+    if (getDialogues().isProcessing()) {
+        Sleep.sleep(100, 200);
+        continue;
+    }
+
+    if (getDialogues().areOptionsAvailable()) {
+        if (getDialogues().chooseOption("Rogue equipment")
+                || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
+            Sleep.sleep(300, 600);
+            continue;
         }
 
-        log("Attempting to remove remaining rogue tokens...");
-        boolean tokensRemoved = false;
-        boolean bankAccessed = false;
-
-        if (getBank().isOpen()) {
-            bankAccessed = true;
-        } else if (openBank()) {
-            bankAccessed = getBank().isOpen();
+        if (getDialogues().chooseFirstOptionContaining("Yes", "Yes please", "Yes, please", "Sure")) {
+            Sleep.sleep(300, 600);
+            continue;
         }
+    }
 
-        if (bankAccessed && getBank().isOpen()) {
-            getBank().depositAll(TOKEN_NAME);
-            Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 2000);
-            tokensRemoved = !Inventory.contains(TOKEN_NAME);
-        }
+    if (getDialogues().canContinue() && getDialogues().clickContinue()) {
+        Sleep.sleep(300, 600);
+        continue;
+    }
 
-        if (bankAccessed) {
-            closeBank();
-        }
+    Sleep.sleep(150, 300);
+}
 
-        if (!tokensRemoved && Inventory.contains(TOKEN_NAME)) {
-            log("Depositing tokens failed, dropping them instead.");
-            while (Inventory.contains(TOKEN_NAME)) {
-                int before = Inventory.count(TOKEN_NAME);
-                Item token = Inventory.get(TOKEN_NAME);
-                if (token == null || !token.interact("Drop")) {
-                    log("Failed to drop a rogue token.");
-                    break;
-                }
-                Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) < before, 1500);
-            }
-            tokensRemoved = !Inventory.contains(TOKEN_NAME);
-        }
+return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
 
-        if (tokensRemoved) {
-            log("Remaining rogue tokens cleared.");
-        } else {
-            log("Unable to clear rogue tokens from inventory.");
+private boolean isRogueGear(String name) {
+    return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
+}
+
+private boolean hasFullRogueSet() {
+    List<String> missing = new ArrayList<>();
+    for (String item : GEAR_ITEMS) {
+        if (!Inventory.contains(item)) {
+            missing.add(item);
         }
-        return tokensRemoved;
+    }
+    if (missing.isEmpty()) {
+        return true;
+    }
+
+    boolean opened = false;
+    if (!getBank().isOpen()) {
+        if (!getBank().openClosest()) {
+            log("Could not open bank to verify rogue set.");
+            return false;
+        }
+        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
+        opened = true;
+    }
+
+    boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
+    return allPresent;
+}
+
     }
 
     private boolean isRogueGear(String name) {
