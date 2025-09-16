@@ -37,6 +37,7 @@ public class RoguesDenScript extends AbstractScript {
     };
 
     private static final int FAILURE_THRESHOLD = 3;
+    private static final int BANK_INTERACTION_RANGE = 15;
 
     private enum InstructionType {
         HINT,
@@ -641,7 +642,7 @@ public class RoguesDenScript extends AbstractScript {
         boolean bankOpened = false;
 
         if (!Inventory.isEmpty()) {
-            if (!openBank()) {
+            if (!ensureBankOpen("deposit inventory")) {
                 return false;
             }
             bankOpened = true;
@@ -656,7 +657,7 @@ public class RoguesDenScript extends AbstractScript {
                 continue;
             }
 
-            if (!bankOpened && !openBank()) {
+            if (!bankOpened && !ensureBankOpen("withdraw " + item)) {
                 return false;
             }
 
@@ -678,7 +679,7 @@ public class RoguesDenScript extends AbstractScript {
         if (config.useStamina) {
             Item stamina = getStaminaPotion();
             if (stamina == null) {
-                if (!bankOpened && !openBank()) {
+                if (!bankOpened && !ensureBankOpen("withdraw a stamina potion")) {
                     return false;
                 }
                 bankOpened = true;
@@ -726,19 +727,75 @@ public class RoguesDenScript extends AbstractScript {
         return suppliesReady;
     }
 
-    private boolean openBank() {
+    private boolean ensureBankOpen(String context) {
         if (getBank().isOpen()) {
             return true;
         }
+
+        if (!isBankInRange()) {
+            String distance = getLocalPlayer() != null
+                ? String.format("%.2f", getLocalPlayer().distance(START_TILE))
+                : "unknown";
+            return handleBankAccessIssue(
+                String.format(
+                    "Closest bank is out of range (distance %s) while attempting to %s.",
+                    distance,
+                    context
+                )
+            );
+        }
+
         if (!getBank().openClosest()) {
-            log("Could not open bank to withdraw supplies.");
+            return handleBankAccessIssue("Failed to open the closest bank while attempting to " + context + ".");
+        }
+
+        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
+            return handleBankAccessIssue("Timed out waiting for bank to open while attempting to " + context + ".");
+        }
+
+        return true;
+    }
+
+    private boolean handleBankAccessIssue(String message) {
+        log(message);
+        if (attemptTeleportToSafety()) {
+            log("Teleport initiated to recover bank access; will retry once relocated.");
             return false;
         }
-        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
-            log("Timed out waiting for bank to open.");
+
+        log("Teleport unavailable or failed; stopping script to avoid running without bank access.");
+        ScriptManager.getScriptManager().stop();
+        return false;
+    }
+
+    private boolean attemptTeleportToSafety() {
+        if (!getMagic().canCast(Normal.HOME_TELEPORT)) {
+            log("Home teleport is not available to recover bank access.");
             return false;
+        }
+
+        log("Attempting home teleport to recover bank access...");
+        if (!getMagic().castSpell(Normal.HOME_TELEPORT)) {
+            log("Failed to cast home teleport while trying to reach a bank.");
+            return false;
+        }
+
+        boolean started = Sleep.sleepUntil(
+            () -> getLocalPlayer() != null && getLocalPlayer().isAnimating(),
+            3000
+        );
+        boolean finished = Sleep.sleepUntil(
+            () -> getLocalPlayer() == null || !getLocalPlayer().isAnimating(),
+            30000
+        );
+        if (started && finished) {
+            log("Home teleport completed for bank recovery.");
         }
         return true;
+    }
+
+    private boolean isBankInRange() {
+        return getLocalPlayer() != null && getLocalPlayer().distance(START_TILE) <= BANK_INTERACTION_RANGE;
     }
 
     private void closeBank() {
