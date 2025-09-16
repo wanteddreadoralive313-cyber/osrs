@@ -11,10 +11,10 @@ import org.dreambot.api.wrappers.interactive.GameObject;
 import java.awt.Point;
 
 public class AntiBan {
-    private static long nextBreak = -1;
-    private static long breakEnd = -1;
+    private long nextBreak = -1;
+    private long breakEnd = -1;
 
-    public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
+    public void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
         if (config == null || !config.antiban) {
             resetScheduler();
             return;
@@ -122,19 +122,19 @@ public class AntiBan {
         abc.generateTrackers();
     }
 
-    public static void sleepReaction(ABCUtil abc, RoguesDenScript.Config config) {
+    public void sleepReaction(ABCUtil abc, RoguesDenScript.Config config) {
         if (config == null || !config.antiban) {
             return;
         }
         Sleep.sleep(abc.generateReactionTime());
     }
 
-    private static void resetScheduler() {
+    private void resetScheduler() {
         nextBreak = -1L;
         breakEnd = -1L;
     }
 
-    private static boolean breaksEnabled(RoguesDenScript.Config config) {
+    private boolean breaksEnabled(RoguesDenScript.Config config) {
         return config.breakIntervalMax > 0 && config.breakLengthMax > 0;
     }
 }

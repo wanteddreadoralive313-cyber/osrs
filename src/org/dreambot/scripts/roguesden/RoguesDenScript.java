@@ -73,7 +73,7 @@ public class RoguesDenScript extends AbstractScript {
         step++;
         lastSafeTile = getLocalPlayer().getTile();
         failureCount = 0;
-        AntiBan.sleepReaction(abc, config);
+        antiBan.sleepReaction(abc, config);
     }
 
     private void instructionFailed(String label, String reason) {
@@ -485,10 +485,15 @@ public void onStart() {
     abc.generateTrackers();
 
 
-    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
-        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
-        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
-    };
+        step += 1;
+    }
+
+    private static final class Config {
+        /**
+         * Whether to drink stamina potions to restore run energy.
+         * True enables potion usage, false avoids it.
+         */
+        boolean useStamina = true;
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
@@ -591,7 +596,7 @@ public void onStart() {
             getWalking().toggleRun(true);
         }
 
-        AntiBan.permute(this, abc, config);
+        antiBan.permute(this, abc, config);
 
         if (handleRewards()) {
             return Calculations.random(600, 900);
