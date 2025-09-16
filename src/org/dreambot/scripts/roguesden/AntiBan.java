@@ -15,39 +15,45 @@ public class AntiBan {
     private static long breakEnd = -1;
 
     public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
-        if (!config.antiban) return;
-
-        // Break scheduler
-        long now = System.currentTimeMillis();
-
-        if (nextBreak == -1) {
-            nextBreak = now + Calculations.random(
-                config.breakIntervalMin * 60_000L,
-                config.breakIntervalMax * 60_000L
-            );
+        if (config == null || !config.antiban) {
+            resetScheduler();
+            return;
         }
 
-        if (breakEnd > 0) {
-            // We are currently on a break
-            if (now >= breakEnd) {
-                Login.login();
-                breakEnd = -1;
+        long now = System.currentTimeMillis();
+        boolean breaksEnabled = breaksEnabled(config);
+
+        if (breaksEnabled) {
+            if (nextBreak == -1) {
                 nextBreak = now + Calculations.random(
                     config.breakIntervalMin * 60_000L,
                     config.breakIntervalMax * 60_000L
                 );
             }
-            return;
-        }
 
-        if (now >= nextBreak) {
-            script.log("Taking scheduled break...");
-            script.getTabs().logout();
-            breakEnd = now + Calculations.random(
-                config.breakLengthMin * 60_000L,
-                config.breakLengthMax * 60_000L
-            );
-            return;
+            if (breakEnd > 0) {
+                if (now >= breakEnd) {
+                    Login.login();
+                    breakEnd = -1;
+                    nextBreak = now + Calculations.random(
+                        config.breakIntervalMin * 60_000L,
+                        config.breakIntervalMax * 60_000L
+                    );
+                }
+                return;
+            }
+
+            if (now >= nextBreak) {
+                script.log("Taking scheduled break...");
+                script.getTabs().logout();
+                breakEnd = now + Calculations.random(
+                    config.breakLengthMin * 60_000L,
+                    config.breakLengthMax * 60_000L
+                );
+                return;
+            }
+        } else {
+            resetScheduler();
         }
 
 
@@ -121,5 +127,14 @@ public class AntiBan {
             return;
         }
         Sleep.sleep(abc.generateReactionTime());
+    }
+
+    private static void resetScheduler() {
+        nextBreak = -1L;
+        breakEnd = -1L;
+    }
+
+    private static boolean breaksEnabled(RoguesDenScript.Config config) {
+        return config.breakIntervalMax > 0 && config.breakLengthMax > 0;
     }
 }

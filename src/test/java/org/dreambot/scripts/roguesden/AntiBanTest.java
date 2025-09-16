@@ -97,6 +97,48 @@ class AntiBanTest {
     }
 
     @Test
+    void permuteSkipsBreakSchedulingWhenDisabled() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.breakIntervalMin = 0;
+        cfg.breakIntervalMax = 0;
+        cfg.breakLengthMin = 0;
+        cfg.breakLengthMax = 0;
+
+        ABCUtil abc = mockABC();
+        AbstractScript script = mockScript();
+        Tabs tabs = mock(Tabs.class);
+        when(script.getTabs()).thenReturn(tabs);
+
+        nextBreakField.setLong(null, 0L);
+        breakEndField.setLong(null, 0L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(tabs, never()).logout();
+        assertEquals(-1L, nextBreakField.getLong(null));
+        assertEquals(-1L, breakEndField.getLong(null));
+        verify(abc).generateTrackers();
+    }
+
+    @Test
+    void permuteResetsSchedulerWhenAntibanDisabled() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.antiban = false;
+
+        ABCUtil abc = mockABC();
+        AbstractScript script = mockScript();
+
+        nextBreakField.setLong(null, 123L);
+        breakEndField.setLong(null, 456L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        assertEquals(-1L, nextBreakField.getLong(null));
+        assertEquals(-1L, breakEndField.getLong(null));
+        verify(abc, never()).generateTrackers();
+    }
+
+    @Test
     void sleepReactionSkipsWhenAntiBanDisabled() {
         RoguesDenScript.Config cfg = baseConfig();
         cfg.antiban = false;

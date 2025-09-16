@@ -109,7 +109,7 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleHint(MazeInstruction instruction) {
         if ("(Drink potion)".equals(instruction.label) && config.useStamina) {
-            Item stamina = Inventory.get(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"));
+            Item stamina = getStaminaPotion();
             if (stamina != null && stamina.interact("Drink")) {
                 Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
             }
@@ -389,6 +389,12 @@ public class RoguesDenScript extends AbstractScript {
             return 600;
         }
 
+        if (!hasRequiredSupplies()) {
+            log("Supplies missing, attempting to restock.");
+            suppliesReady = false;
+            return Calculations.random(300, 600);
+        }
+
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
         }
@@ -465,12 +471,14 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleRest() {
         log("Waiting for run energy...");
-        if (config.useStamina && Inventory.contains(i -> i.getName().contains("Stamina potion"))) {
-            Inventory.get(i -> i.getName().contains("Stamina potion")).interact("Drink");
-            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
-        } else {
-            Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
+        if (config.useStamina) {
+            Item stamina = getStaminaPotion();
+            if (stamina != null && stamina.interact("Drink")) {
+                Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
+                return;
+            }
         }
+        Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
     }
 
     private void handleMaze() {
@@ -659,6 +667,10 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         if (bankOpened) {
+            if (Inventory.contains("Vial")) {
+                getBank().depositAll("Vial");
+                Sleep.sleepUntil(() -> !Inventory.contains("Vial"), 2000);
+            }
             getBank().close();
             Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
@@ -671,17 +683,14 @@ public class RoguesDenScript extends AbstractScript {
                 return false;
             }
             Sleep.sleepUntil(() -> !Inventory.contains(item), 2000);
-            if (Inventory.contains(item)) {
+            if (!isGearEquipped(item)) {
                 log("Could not confirm " + item + " equipped.");
                 return false;
             }
         }
 
         if (config.useStamina) {
-            Item stamina = Inventory.get(i -> {
-                String n = (i == null) ? null : i.getName();
-                return n != null && n.contains("Stamina potion");
-            });
+            Item stamina = getStaminaPotion();
 
             bankOpened = false;
             if (stamina == null) {
@@ -697,7 +706,7 @@ public class RoguesDenScript extends AbstractScript {
                 if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
                     getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
                     Sleep.sleepUntil(() ->
-                        Inventory.contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion")),
+                        Inventory.contains(this::isStaminaPotion),
                         2000
                     );
                 } else {
@@ -706,13 +715,20 @@ public class RoguesDenScript extends AbstractScript {
             }
 
             if (bankOpened) {
+                if (Inventory.contains("Vial")) {
+                    getBank().depositAll("Vial");
+                    Sleep.sleepUntil(() -> !Inventory.contains("Vial"), 2000);
+                }
                 getBank().close();
                 Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
             }
         }
 
-        suppliesReady = true;
-        return true;
+        suppliesReady = hasRequiredSupplies();
+        if (!suppliesReady) {
+            log("Supply verification failed, will retry.");
+        }
+        return suppliesReady;
     }
 
     @Override
@@ -744,6 +760,41 @@ public class RoguesDenScript extends AbstractScript {
         long m = (s % 3600) / 60;
         long sec = s % 60;
         return String.format("%02d:%02d:%02d", h, m, sec);
+    }
+
+    private boolean hasRequiredSupplies() {
+        if (!hasFullRogueSetEquipped()) {
+            return false;
+        }
+        if (config.useStamina && !hasStaminaPotion()) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean hasFullRogueSetEquipped() {
+        for (String item : GEAR_ITEMS) {
+            if (!isGearEquipped(item)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isGearEquipped(String item) {
+        return getEquipment() != null && getEquipment().contains(item);
+    }
+
+    private boolean hasStaminaPotion() {
+        return Inventory.contains(this::isStaminaPotion);
+    }
+
+    private Item getStaminaPotion() {
+        return Inventory.get(this::isStaminaPotion);
+    }
+
+    private boolean isStaminaPotion(Item item) {
+        return item != null && item.getName() != null && item.getName().contains("Stamina potion");
     }
 
     // Methods below are package-private to facilitate unit testing
