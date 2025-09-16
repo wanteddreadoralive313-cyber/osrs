@@ -2,12 +2,17 @@ package org.dreambot.scripts.roguesden;
 
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.methods.container.impl.equipment.Equipment;
+import org.dreambot.api.methods.container.impl.equipment.EquipmentSlot;
+import org.dreambot.api.methods.dialogues.Dialogues;
 import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.magic.Normal;
 import org.dreambot.api.methods.map.Area;
 import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
+import org.dreambot.api.methods.tabs.Tab;
+import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManager;
@@ -16,6 +21,7 @@ import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
 import org.dreambot.api.wrappers.interactive.GameObject;
 import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.wrappers.interactive.Player;
 import org.dreambot.api.wrappers.items.GroundItem;
 import org.dreambot.api.wrappers.items.Item;
 
@@ -37,6 +43,10 @@ public class RoguesDenScript extends AbstractScript {
     };
 
     private static final int FAILURE_THRESHOLD = 3;
+
+    private static final long MAX_TRAVEL_TIME_MS = 120_000L;
+    private static final int MAX_TRAVEL_PATH_FAILURES = 6;
+    private static final int MAX_TRAVEL_RECOVERIES = 3;
 
     private enum InstructionType {
         HINT,
@@ -258,6 +268,18 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
+    private static class TeleportOption {
+        final String keyword;
+        final String dialogueOption;
+        final EquipmentSlot[] slots;
+
+        TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+            this.keyword = keyword;
+            this.dialogueOption = dialogueOption;
+            this.slots = slots;
+        }
+    }
+
     private final MazeInstruction[] MAZE_PATH = new MazeInstruction[]{
         new MazeInstruction(new Tile(3056, 4991, 1), "(Drink potion)", InstructionType.HINT, null),
         new MazeInstruction(new Tile(3004, 5003, 1), "Run", InstructionType.MOVE, null),
@@ -300,6 +322,11 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
         new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
         new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
+    };
+
+    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
+        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
+        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
     };
 
     private final ABCUtil abc = new ABCUtil();
@@ -443,30 +470,194 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        int failures = 0;
-        while (!DEN_AREA.contains(getLocalPlayer())) {
+        Tile lastPosition = getLocalPlayer() != null ? getLocalPlayer().getTile() : null;
+        long lastProgressTime = System.currentTimeMillis();
+        int pathFailures = 0;
+        int recoveryAttempts = 0;
+
+        while (true) {
+            if (getLocalPlayer() != null && DEN_AREA.contains(getLocalPlayer())) {
+                return;
+            }
+
+            if (getLocalPlayer() == null) {
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            Tile currentTile = getLocalPlayer().getTile();
+            if (currentTile != null && (lastPosition == null || !currentTile.equals(lastPosition))) {
+                lastPosition = currentTile;
+                lastProgressTime = System.currentTimeMillis();
+            }
+
+            long elapsed = System.currentTimeMillis() - lastProgressTime;
+            boolean timeExceeded = elapsed > MAX_TRAVEL_TIME_MS;
+            boolean failuresExceeded = pathFailures >= MAX_TRAVEL_PATH_FAILURES;
+
+            if (timeExceeded || failuresExceeded) {
+                recoveryAttempts++;
+                log("Travel to Rogues' Den exceeded limits (failures=" + pathFailures + ", elapsed=" + elapsed + " ms). Recovery attempt " + recoveryAttempts + ".");
+                if (recoveryAttempts > MAX_TRAVEL_RECOVERIES || !attemptTravelRecovery()) {
+                    stopScriptWithMessage("Unable to reach the Rogues' Den after " + recoveryAttempts + " recovery attempts.");
+                    return;
+                }
+
+                lastProgressTime = System.currentTimeMillis();
+                lastPosition = getLocalPlayer().getTile();
+                pathFailures = 0;
+                continue;
+            }
+
             if (getLocalPlayer().isAnimating()) {
                 Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 15000);
                 continue;
             }
 
-            if (failures >= 3 && getMagic().canCast(Normal.HOME_TELEPORT)) {
-                log("Teleporting closer to the Rogues' Den...");
-                if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
-                    Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 30000);
-                }
-                failures = 0;
+            if (getLocalPlayer().isMoving()) {
+                Sleep.sleep(200, 300);
                 continue;
             }
 
             if (!getWalking().walk(START_TILE)) {
-                failures++;
-                log("Failed to generate path to den (" + failures + ")");
+                pathFailures++;
+                log("Failed to generate path to den (" + pathFailures + ")");
                 Sleep.sleep(600, 900);
-            } else {
-                Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()) || !getLocalPlayer().isMoving(), 15000);
+                continue;
+            }
+
+            Sleep.sleepUntil(() -> {
+                Player player = getLocalPlayer();
+                return player != null && (DEN_AREA.contains(player) || player.isMoving());
+            }, 15000);
+            Player movingPlayer = getLocalPlayer();
+            if (movingPlayer != null && movingPlayer.isMoving()) {
+                lastProgressTime = System.currentTimeMillis();
+            }
+            pathFailures = 0;
+        }
+    }
+
+    private boolean attemptTravelRecovery() {
+        log("Initiating travel recovery; attempting to teleport closer to the Rogues' Den.");
+        if (!attemptTeleportToDen()) {
+            log("No valid teleport options available for travel recovery.");
+            return false;
+        }
+
+        Sleep.sleepUntil(() -> {
+            Player player = getLocalPlayer();
+            return player != null && (DEN_AREA.contains(player) || !player.isAnimating());
+        }, 20000);
+        return true;
+    }
+
+    private boolean attemptTeleportToDen() {
+        if (DEN_AREA.contains(getLocalPlayer())) {
+            return true;
+        }
+
+        for (TeleportOption option : TELEPORT_OPTIONS) {
+            if (attemptTeleportWithOption(option)) {
+                return true;
             }
         }
+
+        if (getMagic().canCast(Normal.HOME_TELEPORT)) {
+            log("Travel recovery: casting Home Teleport.");
+            if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
+                waitForTeleport();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean attemptTeleportWithOption(TeleportOption option) {
+        if (option == null) {
+            return false;
+        }
+
+        Item inventoryItem = Inventory.get(item -> matchesTeleportOption(item, option));
+        if (inventoryItem != null && useTeleportItem(inventoryItem, option.dialogueOption, Tab.INVENTORY)) {
+            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + option.dialogueOption + ".");
+            return true;
+        }
+
+        if (option.slots != null) {
+            for (EquipmentSlot slot : option.slots) {
+                if (slot == null) {
+                    continue;
+                }
+                Item equipped = Equipment.getItemInSlot(slot);
+                if (equipped != null && useTeleportItem(equipped, option.dialogueOption, Tab.EQUIPMENT)) {
+                    log("Travel recovery: used " + equipped.getName() + " to teleport to " + option.dialogueOption + ".");
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean useTeleportItem(Item item, String destination, Tab tab) {
+        if (item == null || destination == null) {
+            return false;
+        }
+
+        if (!Tabs.isOpen(tab)) {
+            if (!Tabs.open(tab)) {
+                log("Failed to open " + tab + " tab to use " + item.getName() + ".");
+                return false;
+            }
+            Sleep.sleepUntil(() -> Tabs.isOpen(tab), 1200);
+        }
+
+        if (item.hasAction(destination) && item.interact(destination)) {
+            waitForTeleport();
+            return true;
+        }
+
+        if (item.hasAction("Teleport") && item.interact("Teleport")) {
+            waitForTeleport();
+            return true;
+        }
+
+        if (item.hasAction("Rub") && item.interact("Rub")) {
+            if (!Sleep.sleepUntil(Dialogues::areOptionsAvailable, 3000)) {
+                log("Teleport options did not appear after rubbing " + item.getName() + ".");
+                return false;
+            }
+            if (!Dialogues.chooseOption(destination)) {
+                log("Failed to choose teleport option \"" + destination + "\" for " + item.getName() + ".");
+                return false;
+            }
+            Sleep.sleepUntil(() -> !Dialogues.inDialogue(), 2000);
+            waitForTeleport();
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean matchesTeleportOption(Item item, TeleportOption option) {
+        return item != null
+            && item.getName() != null
+            && option != null
+            && item.getName().toLowerCase().contains(option.keyword.toLowerCase());
+    }
+
+    private boolean waitForTeleport() {
+        Sleep.sleepUntil(() -> getLocalPlayer() != null && (getLocalPlayer().isAnimating() || getLocalPlayer().isMoving()), 5000);
+        Sleep.sleepUntil(() -> getLocalPlayer() != null && !getLocalPlayer().isAnimating(), 30000);
+        Sleep.sleep(600, 900);
+        return true;
+    }
+
+    private void stopScriptWithMessage(String message) {
+        log(message);
+        ScriptManager.getScriptManager().stop();
     }
 
     private void handleRest() {
