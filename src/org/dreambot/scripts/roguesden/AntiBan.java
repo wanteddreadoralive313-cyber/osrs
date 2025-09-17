@@ -16,7 +16,7 @@ public class AntiBan {
 
     public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
         if (config == null || !config.antiban) {
-            resetScheduler();
+            reset();
             return;
         }
 
@@ -53,7 +53,7 @@ public class AntiBan {
                 return;
             }
         } else {
-            resetScheduler();
+            reset();
         }
 
 
@@ -129,7 +129,7 @@ public class AntiBan {
         Sleep.sleep(abc.generateReactionTime());
     }
 
-    private static void resetScheduler() {
+    public static void reset() {
         nextBreak = -1L;
         breakEnd = -1L;
     }
