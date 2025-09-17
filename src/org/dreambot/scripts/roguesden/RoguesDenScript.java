@@ -33,11 +33,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.Properties;
 import java.util.function.Supplier;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
@@ -378,6 +384,13 @@ public class RoguesDenScript extends AbstractScript {
         // Initialize ABC2 reaction-time trackers once at script start
         abc.generateTrackers();
 
+try {
+    Optional<Config> externalConfig = Config.loadFromFileOrSystem();
+    if (externalConfig.isPresent()) {
+        config = externalConfig.get();
+        guiDone.set(true);
+        log("Loaded configuration from external source; skipping GUI.");
+    } else {
         SwingUtilities.invokeLater(() -> {
             gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
@@ -472,6 +485,35 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
         });
+    }
+} catch (IllegalArgumentException e) {
+    log("Failed to load configuration: " + e.getMessage());
+    ScriptManager.getScriptManager().stop();
+    return;
+}
+
+startConfigurationThread();
+}
+
+private void startConfigurationThread() {
+    new Thread(() -> {
+        while (!guiDone.get()) {
+            Sleep.sleep(100);
+        }
+        if (guiCancelled.get()) {
+            log("GUI closed before start; stopping script.");
+            ScriptManager.getScriptManager().stop();
+            return;
+        }
+        if (!validateConfig(config)) {
+            log("Invalid configuration; stopping script.");
+            ScriptManager.getScriptManager().stop();
+            return;
+        }
+        prepareSupplies();
+    }).start();
+}
+
     }
 
     private boolean meetsRequirements() {
@@ -1316,6 +1358,8 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     static class Config {
+        private static final String PROPERTY_PREFIX = "roguesden.";
+
         /**
          * Whether to drink stamina potions to restore run energy.
          * True enables potion usage, false avoids it.
@@ -1390,5 +1434,163 @@ public class RoguesDenScript extends AbstractScript {
          * Must be greater than or equal to {@link #breakLengthMin}.
          */
         int breakLengthMax = 5;    // minutes
+
+        static Optional<Config> loadFromFileOrSystem() {
+            String configFile = firstNonBlank(
+                System.getProperty(PROPERTY_PREFIX + "configFile"),
+                System.getProperty(PROPERTY_PREFIX + "config")
+            );
+
+            Properties fileProps = new Properties();
+            boolean hasConfigSource = false;
+
+            if (configFile != null) {
+                try (InputStream inputStream = Files.newInputStream(Path.of(configFile))) {
+                    fileProps.load(inputStream);
+                    hasConfigSource = true;
+                } catch (IOException | InvalidPathException e) {
+                    throw new IllegalArgumentException("Failed to load configuration file: " + configFile, e);
+                }
+            }
+
+            Config loaded = new Config();
+            boolean hasValue = hasConfigSource;
+
+            String value = resolveProperty("useStamina", fileProps);
+            if (value != null) {
+                loaded.useStamina = parseBoolean(value, "useStamina");
+                hasValue = true;
+            }
+
+            value = resolveProperty("antiban", fileProps);
+            if (value != null) {
+                loaded.antiban = parseBoolean(value, "antiban");
+                hasValue = true;
+            }
+
+            value = resolveProperty("hoverEntities", fileProps);
+            if (value != null) {
+                loaded.hoverEntities = parseBoolean(value, "hoverEntities");
+                hasValue = true;
+            }
+
+            value = resolveProperty("randomRightClick", fileProps);
+            if (value != null) {
+                loaded.randomRightClick = parseBoolean(value, "randomRightClick");
+                hasValue = true;
+            }
+
+            value = resolveProperty("cameraPanning", fileProps);
+            if (value != null) {
+                loaded.cameraPanning = parseBoolean(value, "cameraPanning");
+                hasValue = true;
+            }
+
+            value = resolveProperty("idleMin", fileProps);
+            if (value != null) {
+                loaded.idleMin = parseInt(value, "idleMin");
+                hasValue = true;
+            }
+
+            value = resolveProperty("idleMax", fileProps);
+            if (value != null) {
+                loaded.idleMax = parseInt(value, "idleMax");
+                hasValue = true;
+            }
+
+            value = resolveProperty("runThreshold", fileProps);
+            if (value != null) {
+                loaded.runThreshold = parseInt(value, "runThreshold");
+                hasValue = true;
+            }
+
+            value = resolveProperty("runRestore", fileProps);
+            if (value != null) {
+                loaded.runRestore = parseInt(value, "runRestore");
+                hasValue = true;
+            }
+
+            value = resolveProperty("breakIntervalMin", fileProps);
+            if (value != null) {
+                loaded.breakIntervalMin = parseInt(value, "breakIntervalMin");
+                hasValue = true;
+            }
+
+            value = resolveProperty("breakIntervalMax", fileProps);
+            if (value != null) {
+                loaded.breakIntervalMax = parseInt(value, "breakIntervalMax");
+                hasValue = true;
+            }
+
+            value = resolveProperty("breakLengthMin", fileProps);
+            if (value != null) {
+                loaded.breakLengthMin = parseInt(value, "breakLengthMin");
+                hasValue = true;
+            }
+
+            value = resolveProperty("breakLengthMax", fileProps);
+            if (value != null) {
+                loaded.breakLengthMax = parseInt(value, "breakLengthMax");
+                hasValue = true;
+            }
+
+            if (!hasValue) {
+                return Optional.empty();
+            }
+
+            return Optional.of(loaded);
+        }
+
+        private static String resolveProperty(String key, Properties fileProps) {
+            String prefixedKey = PROPERTY_PREFIX + key;
+            String value = System.getProperty(prefixedKey);
+            if (value == null) {
+                value = System.getProperty(key);
+            }
+            if (value == null) {
+                value = fileProps.getProperty(prefixedKey);
+            }
+            if (value == null) {
+                value = fileProps.getProperty(key);
+            }
+            if (value == null) {
+                return null;
+            }
+            value = value.trim();
+            return value.isEmpty() ? null : value;
+        }
+
+        private static String firstNonBlank(String... values) {
+            for (String value : values) {
+                if (value != null && !value.trim().isEmpty()) {
+                    return value.trim();
+                }
+            }
+            return null;
+        }
+
+        private static boolean parseBoolean(String value, String key) {
+            String normalized = value.toLowerCase();
+            switch (normalized) {
+                case "true":
+                case "yes":
+                case "1":
+                    return true;
+                case "false":
+                case "no":
+                case "0":
+                    return false;
+                default:
+                    throw new IllegalArgumentException("Invalid boolean for " + key + ": " + value);
+            }
+        }
+
+        private static int parseInt(String value, String key) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid integer for " + key + ": " + value, e);
+            }
+        }
     }
 }
