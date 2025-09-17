@@ -301,160 +301,39 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
     };
 
-    private boolean isGuardStunned(NPC guard) {
-        if (guard == null) {
-            return false;
-        }
-        if (guard.isAnimating()) {
-            return true;
-        }
-
-        String[] actions = guard.getActions();
-        if (actions != null) {
-            for (String action : actions) {
-                if (action != null && action.toLowerCase(Locale.ENGLISH).contains("stun")) {
-                    return true;
-                }
-            }
-        }
-
-        String name = guard.getName();
-        return name != null && name.toLowerCase(Locale.ENGLISH).contains("stun");
-    }
-
-    private boolean ensureInventorySpaceForGroundItem(String targetName) {
-        while (Inventory.isFull()) {
-            Item droppable = Inventory.get(i -> i != null && i.getName() != null && !isEssentialItem(i));
-            if (droppable == null) {
-                return false;
-            }
-
-            String dropName = droppable.getName();
-            int beforeCount = Inventory.count(dropName);
-            log("Dropping " + dropName + " to make space for " + targetName + ".");
-            if (!droppable.interact("Drop")) {
-                log("Failed to drop " + dropName + ".");
-                return false;
-            }
-
-            boolean spaceFreed = Sleep.sleepUntil(
-                () -> !Inventory.isFull() || Inventory.count(dropName) < beforeCount,
-                1500
-            );
-
-            if (!spaceFreed && Inventory.isFull()) {
-                log("Dropping " + dropName + " did not free inventory space.");
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean isEssentialItem(Item item) {
-        if (item == null) {
-            return false;
-        }
-        String name = item.getName();
-        if (name == null) {
-            return true;
-        }
-        if (TOKEN_NAME.equalsIgnoreCase(name)) {
-            return true;
-        }
-        if ("Flash powder".equalsIgnoreCase(name)) {
-            return true;
-        }
-        if (name.contains("Stamina potion")) {
-            return true;
-        }
-        return isRogueGear(name);
-    }
-
-    private void handleGuardInstruction(MazeInstruction instruction) {
-        Supplier<NPC> guardSupplier = () -> NPCs.closest(n ->
-            n != null
-                && n.getName() != null
-                && n.getName().equalsIgnoreCase("Rogue guard")
-                && n.getTile() != null
-                && instruction.tile != null
-                && n.getTile().distance(instruction.tile) <= 5
-        );
-
-        NPC guard = guardSupplier.get();
-
-        if (guard == null) {
-            instructionFailed(instruction.label, "guard not found");
-            return;
-        }
-
-        int attempts = 0;
-        while (attempts < 2) {
-            Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
-            if (powder == null) {
-                if (attempts == 0) {
-                    instructionFailed(instruction.label, "missing flash powder");
-                    return;
-                }
-                log("No flash powder remaining for additional attempts.");
-                break;
-            }
-
-            if (!powder.useOn(guard)) {
-                instructionFailed(instruction.label, "failed to use flash powder");
-                return;
-            }
-
-            attempts++;
-
-            boolean stunned = Sleep.sleepUntil(() -> {
-                NPC current = guardSupplier.get();
-                return current == null || isGuardStunned(current);
-            }, Calculations.random(1600, 2200));
-
-            NPC currentGuard = guardSupplier.get();
-
-            if (stunned || currentGuard == null || isGuardStunned(currentGuard)) {
-                Sleep.sleep(600, 900);
-                markStepComplete();
-                return;
-            }
-
-            log("Flash powder attempt " + attempts + " failed to stun the guard, retrying.");
-            guard = currentGuard;
-            Sleep.sleep(300, 600);
-        }
-
-        log("Guard remained active after flash powder attempts, retreating to last safe tile.");
-        if (lastSafeTile != null) {
-            getWalking().walk(lastSafeTile);
-            Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
-        }
-        instructionFailed(instruction.label, "guard not stunned");
-    }
-
-    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
-        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
-        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
-    };
-
-    private final ABCUtil abc = new ABCUtil();
+    private final ABCUtil abc;
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
-    private final Tile CHEST_TILE = new Tile(3046,4976,1);
 
     private int step = 0;
-    private Config config = new Config();
+    private final Config config;
     private RoguesDenGUI gui;
     private boolean ironman;
     private boolean suppliesReady;
-    private boolean postGuiInitializationComplete;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
 
     private enum State { TRAVEL, MAZE, REST }
+
+    public RoguesDenScript() {
+        this(null, null);
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil) {
+        this(abcUtil, null);
+    }
+
+    public RoguesDenScript(Config config) {
+        this(null, config);
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil, Config config) {
+        this.abc = abcUtil != null ? abcUtil : new ABCUtil();
+        this.config = config != null ? config : new Config();
+    }
 
     @Override
     public void onStart() {
@@ -466,6 +345,96 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
+        ironman = getClient().isIronMan();
+
+        // Initialize ABC2 reaction-time trackers once at script start
+        abc.generateTrackers();
+
+        SwingUtilities.invokeLater(() -> {
+            gui = new RoguesDenGUI(config, guiDone, guiCancelled);
+            gui.setVisible(true);
+        });
+
+        new Thread(() -> {
+            while (!guiDone.get()) {
+                Sleep.sleep(100);
+            }
+            if (guiCancelled.get()) {
+                log("GUI closed before start; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
+            }
+            if (!validateConfig(config)) {
+                log("Invalid configuration; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
+            }
+            prepareSupplies();
+        }).start();
+    }
+
+    private final AtomicBoolean guiDone = new AtomicBoolean(false);
+    private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
+    private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
+    private final Tile START_TILE = new Tile(3047,4975,1);
+    private final Tile CHEST_TILE = new Tile(3046,4976,1);
+
+    private int step = 0;
+    private Config config;
+    private RoguesDenGUI gui;
+    private boolean ironman;
+    private boolean suppliesReady;
+    private boolean postGuiInitializationComplete;
+    private int failureCount = 0;
+    private Tile lastSafeTile = START_TILE;
+    private long startTime;
+
+    private enum State { TRAVEL, MAZE, REST }
+
+    public RoguesDenScript() {
+        this(createABCUtil(), createConfig());
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil) {
+        this(abcUtil, createConfig());
+    }
+
+    public RoguesDenScript(Config config) {
+        this(createABCUtil(), config);
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil, Config config) {
+        this.abc = ensureABCUtil(abcUtil);
+        this.config = ensureConfig(config);
+    }
+
+    private static ABCUtil createABCUtil() {
+        return new ABCUtil();
+    }
+
+    private static Config createConfig() {
+        return new Config();
+    }
+
+    private static ABCUtil ensureABCUtil(ABCUtil abcUtil) {
+        return abcUtil != null ? abcUtil : createABCUtil();
+    }
+
+    private static Config ensureConfig(Config config) {
+        return config != null ? config : createConfig();
+    }
+
+    @Override
+    public void onStart() {
+        log("Starting Rogues' Den script");
+        startTime = System.currentTimeMillis();
+        if (!meetsRequirements()) {
+            log("Account doesn't meet Rogues' Den requirements.");
+            ScriptManager.getScriptManager().stop();
+            return;
+        }
+
+        config = ensureConfig(config);
         ironman = getClient().isIronMan();
 
         // Initialize ABC2 reaction-time trackers once at script start
