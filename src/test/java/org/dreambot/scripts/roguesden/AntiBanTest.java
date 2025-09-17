@@ -1,17 +1,23 @@
 package org.dreambot.scripts.roguesden;
 
-import org.dreambot.api.script.AbstractScript;
+import org.dreambot.api.methods.Calculations;
+import org.dreambot.api.methods.camera.Camera;
 import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.input.Mouse;
+import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.utilities.impl.ABCUtil;
+import org.dreambot.api.utilities.sleep.Sleep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import java.awt.Point;
 import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 class AntiBanTest {
@@ -161,6 +167,107 @@ class AntiBanTest {
         AntiBan.sleepReaction(abc, cfg);
 
         verify(abc).generateReactionTime();
+    }
+
+    @Test
+    void permutePerformsMisclickWhenRandomTriggers() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.breakIntervalMin = 0;
+        cfg.breakIntervalMax = 0;
+        cfg.breakLengthMin = 0;
+        cfg.breakLengthMax = 0;
+
+        ABCUtil abc = mockABC();
+        AbstractScript script = mockScript();
+        Mouse mouse = script.getMouse();
+        Point start = new Point(50, 50);
+        when(mouse.getPosition()).thenReturn(start);
+
+        try (MockedStatic<Calculations> calculations = mockStatic(Calculations.class);
+             MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
+
+            AtomicInteger call = new AtomicInteger();
+            calculations.when(() -> Calculations.random(anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    int max = invocation.getArgument(1);
+                    switch (call.getAndIncrement()) {
+                        case 0:
+                            return 1; // Trigger misclick
+                        case 1:
+                            return 10; // X offset
+                        case 2:
+                            return -10; // Y offset
+                        case 3:
+                            return max; // Skip moveRandomly
+                        case 4:
+                            return max; // Skip moveMouseOutsideScreen
+                        case 5:
+                            return max; // Skip occasional off screen move
+                        default:
+                            return max;
+                    }
+                });
+
+            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenAnswer(invocation -> null);
+            sleep.when(() -> Sleep.sleep(anyInt())).thenAnswer(invocation -> null);
+
+            AntiBan.permute(script, abc, cfg);
+        }
+
+        verify(mouse).move(60, 40);
+        verify(mouse).click();
+        verify(mouse).move(start);
+    }
+
+    @Test
+    void permuteRotatesCameraWhenRandomTriggers() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.cameraPanning = true;
+        cfg.breakIntervalMin = 0;
+        cfg.breakIntervalMax = 0;
+        cfg.breakLengthMin = 0;
+        cfg.breakLengthMax = 0;
+
+        ABCUtil abc = mockABC();
+        when(abc.shouldRotateCamera()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        Camera camera = mock(Camera.class);
+        when(script.getCamera()).thenReturn(camera);
+
+        try (MockedStatic<Calculations> calculations = mockStatic(Calculations.class);
+             MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
+
+            AtomicInteger call = new AtomicInteger();
+            calculations.when(() -> Calculations.random(anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    int max = invocation.getArgument(1);
+                    switch (call.getAndIncrement()) {
+                        case 0:
+                            return 99; // Skip misclick
+                        case 1:
+                            return max; // Skip moveRandomly
+                        case 2:
+                            return 1; // Skip moveMouseOutsideScreen
+                        case 3:
+                            return 1500; // Camera yaw
+                        case 4:
+                            return 350; // Camera pitch
+                        case 5:
+                            return max; // Skip occasional off screen move
+                        default:
+                            return max;
+                    }
+                });
+
+            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenAnswer(invocation -> null);
+            sleep.when(() -> Sleep.sleep(anyInt())).thenAnswer(invocation -> null);
+
+            AntiBan.permute(script, abc, cfg);
+        }
+
+        verify(camera).rotateToYaw(1500);
+        verify(camera).rotateToPitch(350);
     }
 }
 
