@@ -504,7 +504,7 @@ public class RoguesDenScript extends AbstractScript {
     private RoguesDenGUI gui;
     private boolean ironman;
     private boolean suppliesReady;
-    private boolean postGuiInitializationComplete;
+    private volatile boolean postGuiInitializationComplete;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
@@ -579,7 +579,6 @@ public class RoguesDenScript extends AbstractScript {
                 ScriptManager.getScriptManager().stop();
                 return;
             }
-            suppliesReady = prepareSupplies();
             postGuiInitializationComplete = true;
         }).start();
     }
@@ -624,6 +623,16 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         if (!suppliesReady) {
+            Player local = getLocalPlayer();
+            if (local == null) {
+                return Calculations.random(200, 400);
+            }
+
+            if (!isBankInRange()) {
+                handleTravel(local);
+                return Calculations.random(300, 600);
+            }
+
             suppliesReady = prepareSupplies();
             return 600;
         }
