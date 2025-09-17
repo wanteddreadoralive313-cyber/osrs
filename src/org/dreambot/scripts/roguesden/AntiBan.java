@@ -2,6 +2,7 @@ package org.dreambot.scripts.roguesden;
 
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.login.Login;
+import org.dreambot.api.methods.login.LoginState;
 import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.utilities.impl.ABCUtil;
@@ -33,7 +34,10 @@ public class AntiBan {
 
             if (breakEnd > 0) {
                 if (now >= breakEnd) {
-                    Login.login();
+                    LoginState loginState = Login.getLoginState();
+                    if (loginState != LoginState.LOGGED_IN) {
+                        Login.login();
+                    }
                     breakEnd = -1;
                     nextBreak = now + Calculations.random(
                         config.breakIntervalMin * 60_000L,
@@ -45,7 +49,10 @@ public class AntiBan {
 
             if (now >= nextBreak) {
                 script.log("Taking scheduled break...");
-                script.getTabs().logout();
+                LoginState loginState = Login.getLoginState();
+                if (loginState == LoginState.LOGGED_IN) {
+                    script.getTabs().logout();
+                }
                 breakEnd = now + Calculations.random(
                     config.breakLengthMin * 60_000L,
                     config.breakLengthMax * 60_000L
