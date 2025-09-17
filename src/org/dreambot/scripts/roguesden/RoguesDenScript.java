@@ -1166,27 +1166,36 @@ public class RoguesDenScript extends AbstractScript {
     private boolean hasFullRogueSet() {
         List<String> missing = new ArrayList<>();
         for (String item : GEAR_ITEMS) {
-            if (!Inventory.contains(item)) {
-                missing.add(item);
+            if (getEquipment() != null && getEquipment().contains(item)) {
+                continue;
             }
+
+            if (Inventory.contains(item)) {
+                continue;
+            }
+
+            missing.add(item);
         }
         if (missing.isEmpty()) {
             return true;
         }
 
-        boolean opened = false;
+        boolean openedHere = false;
         if (!getBank().isOpen()) {
             if (!getBank().openClosest()) {
                 log("Could not open bank to verify rogue set.");
                 return false;
             }
-            Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-            opened = true;
+            if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
+                log("Timed out waiting for bank to open while verifying rogue set.");
+                return false;
+            }
+            openedHere = true;
         }
 
         boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
 
-        if (opened) {
+        if (openedHere) {
             getBank().close();
             Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
         }
