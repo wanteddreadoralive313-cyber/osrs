@@ -25,8 +25,7 @@ class AntiBanTest {
         breakEndField = AntiBan.class.getDeclaredField("breakEnd");
         nextBreakField.setAccessible(true);
         breakEndField.setAccessible(true);
-        nextBreakField.setLong(null, -1L);
-        breakEndField.setLong(null, -1L);
+        AntiBan.reset();
     }
 
     private RoguesDenScript.Config baseConfig() {
