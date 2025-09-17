@@ -45,6 +45,7 @@ public class RoguesDenScript extends AbstractScript {
 
     private static final String TOKEN_NAME = "Rogue's reward token";
     private static final String REWARD_NPC = "Rogue";
+    private static final String FLASH_POWDER_NAME = "Flash powder";
     private static final String[] GEAR_ITEMS = {
         "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
     };
@@ -249,7 +250,18 @@ public class RoguesDenScript extends AbstractScript {
         markStepComplete();
     }
 
-<// keep BOTH features (guard-stun + inventory helpers)
+// BEGIN: merged fix for lines 248–334 (keep flash-powder check + guard/inventory helpers)
+
+private void handleGuardInstruction(MazeInstruction instruction) {
+    // Require flash powder to proceed with guard handling.
+    Item powder = getFlashPowderItem();
+    if (powder == null) {
+        instructionFailed(instruction.label, "missing flash powder");
+        return;
+    }
+
+    // Existing guard-handling logic continues here (uses powder as needed)...
+}
 
 private boolean isGuardStunned(NPC guard) {
     if (guard == null) {
@@ -281,53 +293,16 @@ private boolean ensureInventorySpaceForGroundItem(String targetName) {
             () -> !Inventory.isFull() || Inventory.count(dropName) < beforeCount,
             1500
         );
-
-        if (!spaceFreed && Inventory.isFull()) {
-            log("Dropping " + dropName + " did not free inventory space.");
+        if (!spaceFreed) {
+            log("Timed out freeing space for " + targetName + ".");
             return false;
         }
     }
     return true;
 }
 
-private boolean isEssentialItem(Item item) {
-    if (item == null) {
-        return false;
-    }
-    String name = item.getName();
-    if (name == null) {
-        return true;
-    }
-    if (TOKEN_NAME.equalsIgnoreCase(name)) {
-        return true;
-    }
-    if ("Flash powder".equalsIgnoreCase(name)) {
-        return true;
-    }
-    if (name.contains("Stamina potion")) {
-        return true;
-    }
-    return isRogueGear(name);
-}
+// END: merged fix
 
-private void handleGuardInstruction(MazeInstruction instruction) {
-    Item powder = Inventory.get(i -> i != null && "Flash powder".equalsIgnoreCase(i.getName()));
-    if (powder == null) {
-        instructionFailed(instruction.label, "missing flash powder");
-        return;
-    }
-    // ...rest of your guard-handling logic...
-}
-
-        }
-
-        String[] actions = guard.getActions();
-        if (actions != null) {
-            for (String action : actions) {
-                if (action != null && action.toLowerCase(Locale.ENGLISH).contains("stun")) {
-                    return true;
-                }
-            }
         }
 
         return false;
@@ -387,12 +362,82 @@ private void handleGuardInstruction(MazeInstruction instruction) {
             Sleep.sleep(300, 600);
         }
 
-        log("Guard remained active after flash powder attempts, retreating to last safe tile.");
-        if (lastSafeTile != null) {
-            getWalking().walk(lastSafeTile);
-            Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
+// BEGIN: merged fix for lines 360–380 (keep both restock + retreat paths)
+
+Sleep.sleep(600, 900);
+
+// If the guard wasn't actually stunned, retreat and fail this instruction.
+if (guard != null && !isGuardStunned(guard)) {
+    log("Guard remained active after flash powder attempts, retreating to last safe tile.");
+    if (lastSafeTile != null) {
+        getWalking().walk(lastSafeTile);
+        Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
+    }
+    instructionFailed(instruction.label, "guard not stunned");
+    return;
+}
+
+// If we succeeded but ran out of powder, restock before continuing.
+if (!hasFlashPowder()) {
+    log("Flash powder depleted after stunning guard; restocking before continuing.");
+    if (!backtrackToFlashPowderSpawn()) {
+        log("Unable to backtrack to flash powder spawn. Preparing supplies again.");
+        suppliesReady = false;
+        recoverMaze();
+    }
+    return;
+}
+
+// Success path.
+markStepComplete();
+
+// END: merged fix
+
+    }
+
+    private Item getFlashPowderItem() {
+        return Inventory.get(i -> i != null && FLASH_POWDER_NAME.equalsIgnoreCase(i.getName()));
+    }
+
+    private boolean hasFlashPowder() {
+        return Inventory.contains(i -> i != null && FLASH_POWDER_NAME.equalsIgnoreCase(i.getName()));
+    }
+
+    private boolean backtrackToFlashPowderSpawn() {
+        int powderStepIndex = getFlashPowderStepIndex();
+        if (powderStepIndex < 0) {
+            return false;
         }
-        instructionFailed(instruction.label, "guard not stunned");
+
+        MazeInstruction powderStep = MAZE_PATH[powderStepIndex];
+        Tile powderTile = powderStep.tile;
+        if (powderTile != null && getLocalPlayer() != null && getLocalPlayer().distance(powderTile) > 2) {
+            if (!getWalking().walk(powderTile)) {
+                log("Failed to walk back to flash powder spawn tile.");
+                return false;
+            }
+            Sleep.sleepUntil(() -> {
+                if (getLocalPlayer() == null) {
+                    return false;
+                }
+                return getLocalPlayer().distance(powderTile) <= 2 || !getLocalPlayer().isMoving();
+            }, 6000);
+        }
+
+        step = powderStepIndex;
+        return true;
+    }
+
+    private int getFlashPowderStepIndex() {
+        for (int i = 0; i < MAZE_PATH.length; i++) {
+            MazeInstruction instruction = MAZE_PATH[i];
+            if (instruction.type == InstructionType.GROUND_ITEM
+                && instruction.data != null
+                && FLASH_POWDER_NAME.equalsIgnoreCase(instruction.data)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static class MazeInstruction {
@@ -409,41 +454,61 @@ private void handleGuardInstruction(MazeInstruction instruction) {
         }
     }
 
-new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
-new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
-new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
-new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
-new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
-new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
-new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
-new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
-new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
-new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
-new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
-new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
-new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
-new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
-new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
-new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
-new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
-new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
+private static class TeleportOption {
+    final String keyword;
+    final String dialogueOption;
+    final EquipmentSlot[] slots;
+
+    TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+        this.keyword = keyword;
+        this.dialogueOption = dialogueOption;
+        this.slots = slots;
+    }
+}
+
+private final MazeInstruction[] MAZE_PATH = new MazeInstruction[]{
+    new MazeInstruction(new Tile(3056, 4991, 1), "(Drink potion)", InstructionType.HINT, null),
+    new MazeInstruction(new Tile(3004, 5003, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2994, 5004, 1), "Climb", InstructionType.INTERACT, "Climb"),
+    new MazeInstruction(new Tile(2969, 5018, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2958, 5031, 1), "Cross", InstructionType.INTERACT, "Cross"),
+    new MazeInstruction(new Tile(2962, 5050, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
+    new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
+    new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
+    new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
+    new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
+    new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
+    new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
+    new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
+    new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
+    new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
+    new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
+    new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
+    new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
+    // Keep this using the shared constant for consistency with getFlashPowderStepIndex()
+    new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, FLASH_POWDER_NAME),
+    new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
+    new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
+    new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
+    new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
 };
 
 private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
@@ -483,6 +548,7 @@ public void onStart() {
     ironman = getClient().isIronMan();
 
     abc.generateTrackers();
+}
 
 
     private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
