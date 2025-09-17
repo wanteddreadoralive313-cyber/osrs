@@ -432,10 +432,71 @@ public class RoguesDenScript extends AbstractScript {
         instructionFailed(instruction.label, "guard not stunned");
     }
 
-    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
-        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
-        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
-    };
+new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
+new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
+new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
+new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
+new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
+new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
+new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
+new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
+new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
+new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
+new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
+new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
+new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
+new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
+};
+
+private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
+    new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
+    new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
+};
+
+private final ABCUtil abc = new ABCUtil();
+private final AtomicBoolean guiDone = new AtomicBoolean(false);
+private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
+private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
+private final Tile START_TILE = new Tile(3047,4975,1);
+private final Tile CHEST_TILE = new Tile(3046,4976,1);
+
+private int step = 0;
+private Config config = new Config();
+private RoguesDenGUI gui;
+private boolean ironman;
+private boolean suppliesReady;
+private boolean postGuiInitializationComplete;
+private int failureCount = 0;
+private Tile lastSafeTile = START_TILE;
+private long startTime;
+
+private enum State { TRAVEL, MAZE, REST }
+
+@Override
+public void onStart() {
+    log("Starting Rogues' Den script");
+    startTime = System.currentTimeMillis();
+    if (!meetsRequirements()) {
+        log("Account doesn't meet Rogues' Den requirements.");
+        ScriptManager.getScriptManager().stop();
+        return;
+    }
+
+    ironman = getClient().isIronMan();
+
+    abc.generateTrackers();
+
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
@@ -697,7 +758,7 @@ public class RoguesDenScript extends AbstractScript {
             return true;
         }
 
-        if (option.slots != null) {
+        if (option.slots.length > 0) {
             for (EquipmentSlot slot : option.slots) {
                 if (slot == null) {
                     continue;
