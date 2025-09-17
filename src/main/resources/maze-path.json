@@ -1,0 +1,307 @@
+[
+  {
+    "x": 3056,
+    "y": 4991,
+    "z": 1,
+    "label": "(Drink potion)",
+    "type": "HINT"
+  },
+  {
+    "x": 3004,
+    "y": 5003,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2994,
+    "y": 5004,
+    "z": 1,
+    "label": "Climb",
+    "type": "INTERACT",
+    "data": "Climb"
+  },
+  {
+    "x": 2969,
+    "y": 5018,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 2958,
+    "y": 5031,
+    "z": 1,
+    "label": "Cross",
+    "type": "INTERACT",
+    "data": "Cross"
+  },
+  {
+    "x": 2962,
+    "y": 5050,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 3000,
+    "y": 5034,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2992,
+    "y": 5045,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 2992,
+    "y": 5053,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2980,
+    "y": 5044,
+    "z": 1,
+    "label": "(Go east)",
+    "type": "MOVE"
+  },
+  {
+    "x": 2963,
+    "y": 5056,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2957,
+    "y": 5068,
+    "z": 1,
+    "label": "Enter",
+    "type": "INTERACT",
+    "data": "Enter"
+  },
+  {
+    "x": 2957,
+    "y": 5074,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 2955,
+    "y": 5094,
+    "z": 1,
+    "label": "Enter",
+    "type": "INTERACT",
+    "data": "Enter"
+  },
+  {
+    "x": 2972,
+    "y": 5098,
+    "z": 1,
+    "label": "Enter",
+    "type": "INTERACT",
+    "data": "Enter"
+  },
+  {
+    "x": 2972,
+    "y": 5094,
+    "z": 1,
+    "label": "Open",
+    "type": "INTERACT",
+    "data": "Open"
+  },
+  {
+    "x": 2976,
+    "y": 5087,
+    "z": 1,
+    "label": "Click",
+    "type": "INTERACT",
+    "data": "Search"
+  },
+  {
+    "x": 2982,
+    "y": 5087,
+    "z": 1,
+    "label": "Climb",
+    "type": "INTERACT",
+    "data": "Climb"
+  },
+  {
+    "x": 2993,
+    "y": 5088,
+    "z": 1,
+    "label": "Search",
+    "type": "INTERACT",
+    "data": "Search"
+  },
+  {
+    "x": 2997,
+    "y": 5088,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 3006,
+    "y": 5088,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2989,
+    "y": 5057,
+    "z": 1,
+    "label": "Open",
+    "type": "INTERACT",
+    "data": "Open"
+  },
+  {
+    "x": 2992,
+    "y": 5058,
+    "z": 1,
+    "label": "(Go north)",
+    "type": "MOVE"
+  },
+  {
+    "x": 2992,
+    "y": 5067,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 2992,
+    "y": 5075,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 2974,
+    "y": 5061,
+    "z": 1,
+    "label": "Enter",
+    "type": "INTERACT",
+    "data": "Enter"
+  },
+  {
+    "x": 3050,
+    "y": 4997,
+    "z": 1,
+    "label": "Enter",
+    "type": "INTERACT",
+    "data": "Enter"
+  },
+  {
+    "x": 3039,
+    "y": 4999,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 3029,
+    "y": 5003,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 3024,
+    "y": 5001,
+    "z": 1,
+    "label": "Open",
+    "type": "INTERACT",
+    "data": "Open"
+  },
+  {
+    "x": 3011,
+    "y": 5005,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 3028,
+    "y": 5033,
+    "z": 1,
+    "label": "Stand",
+    "type": "MOVE"
+  },
+  {
+    "x": 3024,
+    "y": 5033,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 3015,
+    "y": 5033,
+    "z": 1,
+    "label": "Open",
+    "type": "INTERACT",
+    "data": "Open"
+  },
+  {
+    "x": 3010,
+    "y": 5033,
+    "z": 1,
+    "label": "Run/Open",
+    "type": "INTERACT",
+    "data": "Open"
+  },
+  {
+    "x": 3009,
+    "y": 5063,
+    "z": 1,
+    "label": "Take",
+    "type": "GROUND_ITEM",
+    "data": "Flash powder"
+  },
+  {
+    "x": 3014,
+    "y": 5063,
+    "z": 1,
+    "label": "(Stun NPC)",
+    "type": "STUN_GUARD"
+  },
+  {
+    "x": 3028,
+    "y": 5056,
+    "z": 1,
+    "label": "Run",
+    "type": "MOVE"
+  },
+  {
+    "x": 3028,
+    "y": 5047,
+    "z": 1,
+    "label": "Walk",
+    "type": "INTERACT",
+    "data": "Walk-across"
+  },
+  {
+    "x": 3039,
+    "y": 5043,
+    "z": 1,
+    "label": "(Go south-west)",
+    "type": "MOVE"
+  },
+  {
+    "x": 3018,
+    "y": 5047,
+    "z": 1,
+    "label": "Crack",
+    "type": "INTERACT",
+    "data": "Crack"
+  }
+]

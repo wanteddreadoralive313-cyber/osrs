@@ -1,5 +1,6 @@
 package org.dreambot.scripts.roguesden;
 
+import com.google.gson.Gson;
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.interactive.GameObjects;
@@ -22,6 +23,10 @@ import org.dreambot.api.wrappers.items.Item;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -258,49 +263,65 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private final MazeInstruction[] MAZE_PATH = new MazeInstruction[]{
-        new MazeInstruction(new Tile(3056, 4991, 1), "(Drink potion)", InstructionType.HINT, null),
-        new MazeInstruction(new Tile(3004, 5003, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2994, 5004, 1), "Climb", InstructionType.INTERACT, "Climb"),
-        new MazeInstruction(new Tile(2969, 5018, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2958, 5031, 1), "Cross", InstructionType.INTERACT, "Cross"),
-        new MazeInstruction(new Tile(2962, 5050, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
-        new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
-        new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
-        new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
-        new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
-    };
+    private MazeInstruction[] MAZE_PATH = new MazeInstruction[0];
+
+    private static class MazeInstructionDefinition {
+        Integer x;
+        Integer y;
+        Integer z;
+        String label;
+        InstructionType type;
+        String data;
+
+        Tile toTile() {
+            int tileX = x != null ? x : 0;
+            int tileY = y != null ? y : 0;
+            int tileZ = z != null ? z : 1;
+            return new Tile(tileX, tileY, tileZ);
+        }
+    }
+
+    private MazeInstruction[] loadMazeInstructions() {
+        try (InputStream input = getClass().getResourceAsStream("/maze-path.json")) {
+            if (input == null) {
+                log("Maze path resource not found.");
+                return new MazeInstruction[0];
+            }
+
+            try (Reader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
+                MazeInstructionDefinition[] definitions = new Gson().fromJson(reader, MazeInstructionDefinition[].class);
+                if (definitions == null) {
+                    log("Maze instruction file is empty.");
+                    return new MazeInstruction[0];
+                }
+
+                List<MazeInstruction> instructions = new ArrayList<>(definitions.length);
+                for (int i = 0; i < definitions.length; i++) {
+                    MazeInstructionDefinition definition = definitions[i];
+                    if (definition == null) {
+                        log("Skipping null instruction definition at index " + i);
+                        continue;
+                    }
+                    if (definition.label == null || definition.type == null) {
+                        log("Instruction definition missing required fields at index " + i);
+                        continue;
+                    }
+                    if (definition.x == null || definition.y == null) {
+                        log("Instruction definition missing tile coordinates at index " + i);
+                        continue;
+                    }
+
+                    Tile tile = definition.toTile();
+                    instructions.add(new MazeInstruction(tile, definition.label, definition.type, definition.data));
+                }
+
+                return instructions.toArray(new MazeInstruction[0]);
+            }
+        } catch (Exception e) {
+            log("Failed to load maze path: " + e.getMessage());
+            return new MazeInstruction[0];
+        }
+    }
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
@@ -323,6 +344,13 @@ public class RoguesDenScript extends AbstractScript {
     public void onStart() {
         log("Starting Rogues' Den script");
         startTime = System.currentTimeMillis();
+        MAZE_PATH = loadMazeInstructions();
+        if (MAZE_PATH.length == 0) {
+            log("Failed to load maze instructions; stopping script.");
+            ScriptManager.getScriptManager().stop();
+            return;
+        }
+        log("Loaded " + MAZE_PATH.length + " maze instructions.");
         if (!meetsRequirements()) {
             log("Account doesn't meet Rogues' Den requirements.");
             ScriptManager.getScriptManager().stop();
