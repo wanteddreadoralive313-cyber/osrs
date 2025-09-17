@@ -56,6 +56,34 @@ public class RoguesDenScript extends AbstractScript {
     private static final int MAX_TRAVEL_PATH_FAILURES = 6;
     private static final int MAX_TRAVEL_RECOVERIES = 3;
 
+    private static class TeleportOption {
+        private final String keyword;
+        private final String dialogueOption;
+        private final EquipmentSlot[] slots;
+
+        TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+            this.keyword = keyword;
+            this.dialogueOption = dialogueOption;
+            this.slots = slots == null ? new EquipmentSlot[0] : Arrays.copyOf(slots, slots.length);
+        }
+
+        String getKeyword() {
+            return keyword;
+        }
+
+        String getDialogueOption() {
+            return dialogueOption;
+        }
+
+        EquipmentSlot[] getSlots() {
+            return slots;
+        }
+    }
+
+    private static final TeleportOption[] TELEPORT_OPTIONS = {
+        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET)
+    };
+
     private enum InstructionType {
         HINT,
         MOVE,
@@ -661,21 +689,19 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         Item inventoryItem = Inventory.get(item -> matchesTeleportOption(item, option));
-        if (inventoryItem != null && useTeleportItem(inventoryItem, option.dialogueOption, Tab.INVENTORY)) {
-            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + option.dialogueOption + ".");
+        if (inventoryItem != null && useTeleportItem(inventoryItem, option.getDialogueOption(), Tab.INVENTORY)) {
+            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + option.getDialogueOption() + ".");
             return true;
         }
 
-        if (option.slots != null) {
-            for (EquipmentSlot slot : option.slots) {
-                if (slot == null) {
-                    continue;
-                }
-                Item equipped = Equipment.getItemInSlot(slot);
-                if (equipped != null && useTeleportItem(equipped, option.dialogueOption, Tab.EQUIPMENT)) {
-                    log("Travel recovery: used " + equipped.getName() + " to teleport to " + option.dialogueOption + ".");
-                    return true;
-                }
+        for (EquipmentSlot slot : option.getSlots()) {
+            if (slot == null) {
+                continue;
+            }
+            Item equipped = Equipment.getItemInSlot(slot);
+            if (equipped != null && useTeleportItem(equipped, option.getDialogueOption(), Tab.EQUIPMENT)) {
+                log("Travel recovery: used " + equipped.getName() + " to teleport to " + option.getDialogueOption() + ".");
+                return true;
             }
         }
 
@@ -726,7 +752,7 @@ public class RoguesDenScript extends AbstractScript {
         return item != null
             && item.getName() != null
             && option != null
-            && item.getName().toLowerCase().contains(option.keyword.toLowerCase());
+            && item.getName().toLowerCase().contains(option.getKeyword().toLowerCase());
     }
 
     private boolean waitForTeleport() {
