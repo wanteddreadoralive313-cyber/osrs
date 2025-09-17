@@ -983,87 +983,110 @@ public void onStart() {
         }
         return true;
     }
-// Wait for any dialogue state to appear
-Sleep.sleepUntil(() -> getDialogues().inDialogue()
-        || getDialogues().areOptionsAvailable()
-        || getDialogues().canContinue()
-        || getDialogues().isProcessing(),
-    3000
-);
 
-// Drive the dialogue to obtain Rogue equipment (timeout ~12s)
-long timeout = System.currentTimeMillis() + 12000;
-while (System.currentTimeMillis() < timeout) {
-    if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
-        return true;
-    }
+    private boolean handleRewardDialogue() {
+        Sleep.sleepUntil(() -> getDialogues().inDialogue()
+                || getDialogues().areOptionsAvailable()
+                || getDialogues().canContinue()
+                || getDialogues().isProcessing(),
+            3000
+        );
 
-    boolean dialogueActive = getDialogues().inDialogue()
-            || getDialogues().areOptionsAvailable()
-            || getDialogues().canContinue()
-            || getDialogues().isProcessing();
+        long timeout = System.currentTimeMillis() + 12000;
+        while (System.currentTimeMillis() < timeout) {
+            if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
+                return true;
+            }
 
-    if (!dialogueActive) {
-        break;
-    }
+            boolean dialogueActive = getDialogues().inDialogue()
+                || getDialogues().areOptionsAvailable()
+                || getDialogues().canContinue()
+                || getDialogues().isProcessing();
 
-    if (getDialogues().isProcessing()) {
-        Sleep.sleep(100, 200);
-        continue;
-    }
+            if (!dialogueActive) {
+                break;
+            }
 
-    if (getDialogues().areOptionsAvailable()) {
-        if (getDialogues().chooseOption("Rogue equipment")
-                || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
-            Sleep.sleep(300, 600);
-            continue;
+            if (getDialogues().isProcessing()) {
+                Sleep.sleep(100, 200);
+                continue;
+            }
+
+            if (getDialogues().areOptionsAvailable()) {
+                if (getDialogues().chooseOption("Rogue equipment")
+                    || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
+                    Sleep.sleep(300, 600);
+                    continue;
+                }
+
+                if (getDialogues().chooseFirstOptionContaining("Yes", "Yes please", "Yes, please", "Sure")) {
+                    Sleep.sleep(300, 600);
+                    continue;
+                }
+            }
+
+            if (getDialogues().canContinue() && getDialogues().clickContinue()) {
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            Sleep.sleep(150, 300);
         }
 
-        if (getDialogues().chooseFirstOptionContaining("Yes", "Yes please", "Yes, please", "Sure")) {
-            Sleep.sleep(300, 600);
-            continue;
+        return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
+    }
+
+    private boolean disposeTokens() {
+        int tokenCount = Inventory.count(TOKEN_NAME);
+        if (tokenCount < 1) {
+            return true;
         }
-    }
 
-    if (getDialogues().canContinue() && getDialogues().clickContinue()) {
-        Sleep.sleep(300, 600);
-        continue;
-    }
+        log("Disposing of leftover rogue tokens: " + tokenCount);
 
-    Sleep.sleep(150, 300);
-}
+        boolean disposed = false;
+        boolean openedBankHere = false;
 
-return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
-
-private boolean isRogueGear(String name) {
-    return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
-}
-
-private boolean hasFullRogueSet() {
-    List<String> missing = new ArrayList<>();
-    for (String item : GEAR_ITEMS) {
-        if (!Inventory.contains(item)) {
-            missing.add(item);
+        if (!getBank().isOpen()) {
+            if (ensureBankOpen("deposit leftover reward tokens")) {
+                openedBankHere = true;
+            }
         }
-    }
-    if (missing.isEmpty()) {
-        return true;
-    }
 
-    boolean opened = false;
-    if (!getBank().isOpen()) {
-        if (!getBank().openClosest()) {
-            log("Could not open bank to verify rogue set.");
-            return false;
+        if (getBank().isOpen()) {
+            getBank().depositAll(TOKEN_NAME);
+            disposed = Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 2000);
+            if (!disposed) {
+                log("Failed to deposit rogue tokens; attempting to drop them.");
+            }
         }
-        Sleep.sleepUntil(() -> getBank().isOpen(), 5000);
-        opened = true;
-    }
 
-    boolean allPresent = missing.stream().allMatch(i -> getBank().contains(i));
-    return allPresent;
-}
+        if (openedBankHere) {
+            closeBank();
+        }
 
+        if (!disposed) {
+            int attempts = 0;
+            while (Inventory.contains(TOKEN_NAME) && attempts < 5) {
+                Item token = Inventory.get(TOKEN_NAME);
+                if (token == null || !token.interact("Drop")) {
+                    break;
+                }
+                Sleep.sleep(200, 400);
+                Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 1200);
+                attempts++;
+            }
+            disposed = !Inventory.contains(TOKEN_NAME);
+        }
+
+        if (disposed) {
+            step = 0;
+            failureCount = 0;
+            return true;
+        }
+
+        log("Unable to remove rogue tokens after reward failure.");
+        return false;
     }
 
     private boolean isRogueGear(String name) {
