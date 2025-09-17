@@ -409,6 +409,18 @@ private void handleGuardInstruction(MazeInstruction instruction) {
         }
     }
 
+    private static class TeleportOption {
+        final String keyword;
+        final String dialogueOption;
+        final EquipmentSlot[] slots;
+
+        TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+            this.keyword = keyword;
+            this.dialogueOption = dialogueOption;
+            this.slots = slots == null ? new EquipmentSlot[0] : slots;
+        }
+    }
+
 new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
 new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
 new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
@@ -484,11 +496,6 @@ public void onStart() {
 
     abc.generateTrackers();
 
-
-    private static final TeleportOption[] TELEPORT_OPTIONS = new TeleportOption[]{
-        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET),
-        new TeleportOption("Combat bracelet", "Warriors' Guild", EquipmentSlot.HANDS)
-    };
 
     private final ABCUtil abc = new ABCUtil();
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
@@ -750,7 +757,7 @@ public void onStart() {
             return true;
         }
 
-        if (option.slots != null) {
+        if (option.slots.length > 0) {
             for (EquipmentSlot slot : option.slots) {
                 if (slot == null) {
                     continue;
