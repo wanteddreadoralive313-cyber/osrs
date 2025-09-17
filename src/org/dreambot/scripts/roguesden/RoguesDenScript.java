@@ -375,77 +375,6 @@ public class RoguesDenScript extends AbstractScript {
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
-
-    private int step = 0;
-    private final Config config;
-    private RoguesDenGUI gui;
-    private boolean ironman;
-    private boolean suppliesReady;
-    private int failureCount = 0;
-    private Tile lastSafeTile = START_TILE;
-    private long startTime;
-
-    private enum State { TRAVEL, MAZE, REST }
-
-    public RoguesDenScript() {
-        this(null, null);
-    }
-
-    public RoguesDenScript(ABCUtil abcUtil) {
-        this(abcUtil, null);
-    }
-
-    public RoguesDenScript(Config config) {
-        this(null, config);
-    }
-
-    public RoguesDenScript(ABCUtil abcUtil, Config config) {
-        this.abc = abcUtil != null ? abcUtil : new ABCUtil();
-        this.config = config != null ? config : new Config();
-    }
-
-    @Override
-    public void onStart() {
-        log("Starting Rogues' Den script");
-        startTime = System.currentTimeMillis();
-        if (!meetsRequirements()) {
-            log("Account doesn't meet Rogues' Den requirements.");
-            ScriptManager.getScriptManager().stop();
-            return;
-        }
-
-        ironman = getClient().isIronMan();
-
-        // Initialize ABC2 reaction-time trackers once at script start
-        abc.generateTrackers();
-
-        SwingUtilities.invokeLater(() -> {
-            gui = new RoguesDenGUI(config, guiDone, guiCancelled);
-            gui.setVisible(true);
-        });
-
-        new Thread(() -> {
-            while (!guiDone.get()) {
-                Sleep.sleep(100);
-            }
-            if (guiCancelled.get()) {
-                log("GUI closed before start; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            if (!validateConfig(config)) {
-                log("Invalid configuration; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return;
-            }
-            prepareSupplies();
-        }).start();
-    }
-
-    private final AtomicBoolean guiDone = new AtomicBoolean(false);
-    private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
-    private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
-    private final Tile START_TILE = new Tile(3047,4975,1);
     private final Tile CHEST_TILE = new Tile(3046,4976,1);
 
     private int step = 0;
@@ -513,6 +442,24 @@ public class RoguesDenScript extends AbstractScript {
             gui = new RoguesDenGUI(config, guiDone, guiCancelled);
             gui.setVisible(true);
         });
+
+        new Thread(() -> {
+            while (!guiDone.get()) {
+                Sleep.sleep(100);
+            }
+            if (guiCancelled.get()) {
+                log("GUI closed before start; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
+            }
+            if (!validateConfig(config)) {
+                log("Invalid configuration; stopping script.");
+                ScriptManager.getScriptManager().stop();
+                return;
+            }
+            suppliesReady = prepareSupplies();
+            postGuiInitializationComplete = true;
+        }).start();
     }
 
     private boolean meetsRequirements() {
@@ -551,13 +498,6 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         if (!postGuiInitializationComplete) {
-            if (!validateConfig(config)) {
-                log("Invalid configuration; stopping script.");
-                ScriptManager.getScriptManager().stop();
-                return 0;
-            }
-            suppliesReady = prepareSupplies();
-            postGuiInitializationComplete = true;
             return 600;
         }
 
