@@ -1,8 +1,12 @@
 package org.dreambot.scripts.roguesden;
 
+import org.dreambot.api.input.Mouse;
 import org.dreambot.api.methods.Calculations;
+import org.dreambot.api.methods.camera.Camera;
+import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.login.Login;
 import org.dreambot.api.methods.tabs.Tab;
+import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
@@ -16,7 +20,7 @@ public class AntiBan {
 
     public static void permute(AbstractScript script, ABCUtil abc, RoguesDenScript.Config config) {
         if (config == null || !config.antiban) {
-            resetScheduler();
+            reset();
             return;
         }
 
@@ -45,7 +49,10 @@ public class AntiBan {
 
             if (now >= nextBreak) {
                 script.log("Taking scheduled break...");
-                script.getTabs().logout();
+                Tabs tabs = script.getTabs();
+                if (tabs != null) {
+                    tabs.logout();
+                }
                 breakEnd = now + Calculations.random(
                     config.breakLengthMin * 60_000L,
                     config.breakLengthMax * 60_000L
@@ -53,7 +60,7 @@ public class AntiBan {
                 return;
             }
         } else {
-            resetScheduler();
+            reset();
         }
 
 
@@ -65,50 +72,62 @@ public class AntiBan {
         }
 
         if (abc.shouldOpenTab()) {
-            script.getTabs().openWithMouse(Tab.INVENTORY);
+            Tabs tabs = script.getTabs();
+            if (tabs != null) {
+                tabs.openWithMouse(Tab.INVENTORY);
+            }
         }
 
         // Hover a nearby entity if enabled
         if (config.hoverEntities && abc.shouldHover()) {
-            GameObject g = script.getGameObjects().closest(o -> o != null);
-            if (g != null) {
-                g.hover();
+            GameObjects gameObjects = script.getGameObjects();
+            if (gameObjects != null) {
+                GameObject g = gameObjects.closest(o -> o != null);
+                if (g != null) {
+                    g.hover();
+                }
             }
         }
 
         // Random misclicks followed by corrections
-        if (Calculations.random(0, 100) < 2) {
-            Point start = script.getMouse().getPosition();
-            script.getMouse().move(start.x + Calculations.random(-80, 80), start.y + Calculations.random(-80, 80));
-            script.getMouse().click();
-            Sleep.sleep(200, 600);
-            script.getMouse().move(start);
+        Mouse mouse = script.getMouse();
+        if (mouse != null && Calculations.random(0, 100) < 2) {
+            Point start = mouse.getPosition();
+            if (start != null) {
+                mouse.move(start.x + Calculations.random(-80, 80), start.y + Calculations.random(-80, 80));
+                mouse.click();
+                Sleep.sleep(200, 600);
+                mouse.move(start);
+            }
         }
 
         // Mouse path variability and mini-breaks
-        if (Calculations.random(0, 100) < 5) {
-            script.getMouse().moveRandomly();
+        if (mouse != null && Calculations.random(0, 100) < 5) {
+            mouse.moveRandomly();
         }
 
-        if (Calculations.random(0, 200) == 0) {
-            script.getMouse().moveMouseOutsideScreen();
+        if (mouse != null && Calculations.random(0, 200) == 0) {
+            mouse.moveMouseOutsideScreen();
             Sleep.sleep(Calculations.random(500, 1500));
         }
 
         // Random right-click if enabled
-        if (config.randomRightClick && abc.shouldOpenMenu()) {
-            script.getMouse().click(false);
+        if (mouse != null && config.randomRightClick && abc.shouldOpenMenu()) {
+            mouse.click(false);
         }
 
         // Timed camera panning
         if (config.cameraPanning && abc.shouldRotateCamera()) {
-            script.getCamera().rotateToYaw(Calculations.random(0, 2048));
-            script.getCamera().rotateToPitch(Calculations.random(300, 400));
+            Camera camera = script.getCamera();
+            if (camera != null) {
+                camera.rotateToYaw(Calculations.random(0, 2048));
+                camera.rotateToPitch(Calculations.random(300, 400));
+            }
         }
 
         // Occasionally move mouse off screen
-        if (Calculations.random(0, 40) == 0) {
-            script.getMouse().moveMouseOutsideScreen();
+        if (mouse != null && Calculations.random(0, 40) == 0) {
+            mouse.moveMouseOutsideScreen();
         }
 
         // Optional idle delay
@@ -129,7 +148,7 @@ public class AntiBan {
         Sleep.sleep(abc.generateReactionTime());
     }
 
-    private static void resetScheduler() {
+    public static void reset() {
         nextBreak = -1L;
         breakEnd = -1L;
     }
