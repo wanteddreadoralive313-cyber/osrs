@@ -35,6 +35,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
@@ -291,43 +292,83 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private static final MazeInstruction[] MAZE_PATH = {
-        new MazeInstruction(new Tile(3000, 5034, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5045, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5053, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2980, 5044, 1), "(Go east)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2963, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2957, 5068, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2957, 5074, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2955, 5094, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5098, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(2972, 5094, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2976, 5087, 1), "Click", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2982, 5087, 1), "Climb", InstructionType.INTERACT, "Climb"),
-        new MazeInstruction(new Tile(2993, 5088, 1), "Search", InstructionType.INTERACT, "Search"),
-        new MazeInstruction(new Tile(2997, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3006, 5088, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2989, 5057, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(2992, 5058, 1), "(Go north)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5067, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2992, 5075, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(2974, 5061, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3050, 4997, 1), "Enter", InstructionType.INTERACT, "Enter"),
-        new MazeInstruction(new Tile(3039, 4999, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3029, 5003, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5001, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3011, 5005, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5033, 1), "Stand", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3024, 5033, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3015, 5033, 1), "Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3010, 5033, 1), "Run/Open", InstructionType.INTERACT, "Open"),
-        new MazeInstruction(new Tile(3009, 5063, 1), "Take", InstructionType.GROUND_ITEM, "Flash powder"),
-        new MazeInstruction(new Tile(3014, 5063, 1), "(Stun NPC)", InstructionType.STUN_GUARD, null),
-        new MazeInstruction(new Tile(3028, 5056, 1), "Run", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3028, 5047, 1), "Walk", InstructionType.INTERACT, "Walk-across"),
-        new MazeInstruction(new Tile(3039, 5043, 1), "(Go south-west)", InstructionType.MOVE, null),
-        new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
-    };
+    private static final List<MazeInstruction> MAZE_PATH = Collections.unmodifiableList(loadMazePath());
+
+    private static List<MazeInstruction> loadMazePath() {
+        List<MazeInstruction> instructions = new ArrayList<>();
+        try (InputStream stream = RoguesDenScript.class.getResourceAsStream("maze_path.csv")) {
+            if (stream == null) {
+                throw new IllegalStateException("Unable to locate maze_path.csv resource");
+            }
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                int lineNumber = 0;
+                while ((line = reader.readLine()) != null) {
+                    lineNumber++;
+                    line = line.trim();
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        continue;
+                    }
+
+                    String[] parts = line.split("\\|", -1);
+                    if (parts.length < 3) {
+                        throw new IllegalStateException("Invalid maze instruction on line " + lineNumber + ": " + line);
+                    }
+
+                    Tile tile = parseTile(parts[0].trim(), lineNumber);
+                    String label = parts[1].trim();
+                    InstructionType type = parseInstructionType(parts[2].trim(), lineNumber);
+                    String data = parts.length > 3 ? parts[3].trim() : null;
+                    if (data != null && data.isEmpty()) {
+                        data = null;
+                    }
+
+                    instructions.add(new MazeInstruction(tile, label, type, data));
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load maze_path.csv", e);
+        }
+
+        if (instructions.isEmpty()) {
+            throw new IllegalStateException("No maze instructions loaded from maze_path.csv");
+        }
+
+        return instructions;
+    }
+
+    private static Tile parseTile(String raw, int lineNumber) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+
+        String[] coords = raw.split(",");
+        if (coords.length != 3) {
+            throw new IllegalStateException("Invalid tile coordinates on line " + lineNumber + ": " + raw);
+        }
+
+        try {
+            int x = Integer.parseInt(coords[0].trim());
+            int y = Integer.parseInt(coords[1].trim());
+            int z = Integer.parseInt(coords[2].trim());
+            return new Tile(x, y, z);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Non-numeric tile coordinate on line " + lineNumber + ": " + raw, e);
+        }
+    }
+
+    private static InstructionType parseInstructionType(String raw, int lineNumber) {
+        if (raw == null || raw.isEmpty()) {
+            throw new IllegalStateException("Missing instruction type on line " + lineNumber);
+        }
+
+        try {
+            return InstructionType.valueOf(raw.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Unknown instruction type '" + raw + "' on line " + lineNumber, ex);
+        }
+    }
 
     private final ABCUtil abc;
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
@@ -785,12 +826,12 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        if (step >= MAZE_PATH.length) {
+        if (step >= MAZE_PATH.size()) {
             handleChest();
             return;
         }
 
-        MazeInstruction current = MAZE_PATH[step];
+        MazeInstruction current = MAZE_PATH.get(step);
         switch (current.type) {
             case SKIP:
                 step++;
@@ -1252,7 +1293,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Runtime: " + formatTime(System.currentTimeMillis() - startTime), 10, y);
         y += 15;
-        g.drawString("Step: " + step + "/" + MAZE_PATH.length, 10, y);
+        g.drawString("Step: " + step + "/" + MAZE_PATH.size(), 10, y);
         y += 15;
         g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
         y += 15;
@@ -1308,7 +1349,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     int getMazeStepCount() {
-        return MAZE_PATH.length;
+        return MAZE_PATH.size();
     }
 
     void incrementStep() {
