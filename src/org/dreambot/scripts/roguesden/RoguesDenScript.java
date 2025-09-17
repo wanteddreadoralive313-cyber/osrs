@@ -2,6 +2,7 @@ package org.dreambot.scripts.roguesden;
 
 import org.dreambot.api.methods.Calculations;
 import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.methods.container.impl.bank.Bank;
 import org.dreambot.api.methods.interactive.GameObjects;
 import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.methods.magic.Normal;
@@ -727,26 +728,40 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean openBank() {
-        if (getBank().isOpen()) {
+        final Bank bank = getBank();
+        if (bank == null) {
+            log("Bank API is unavailable, cannot open bank.");
+            return false;
+        }
+        if (bank.isOpen()) {
             return true;
         }
-        if (!getBank().openClosest()) {
+        if (!bank.openClosest()) {
             log("Could not open bank to withdraw supplies.");
             return false;
         }
-        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
+        if (!Sleep.sleepUntil(bank::isOpen, 5000)) {
             log("Timed out waiting for bank to open.");
             return false;
         }
         return true;
     }
 
-    private void closeBank() {
-        if (!getBank().isOpen()) {
-            return;
+    private boolean closeBank() {
+        final Bank bank = getBank();
+        if (bank == null) {
+            log("Bank API is unavailable, cannot close bank.");
+            return false;
         }
-        getBank().close();
-        Sleep.sleepUntil(() -> !getBank().isOpen(), 2000);
+        if (!bank.isOpen()) {
+            return true;
+        }
+        bank.close();
+        if (!Sleep.sleepUntil(() -> !bank.isOpen(), 2000)) {
+            log("Timed out waiting for bank to close.");
+            return false;
+        }
+        return true;
     }
 
     @Override
