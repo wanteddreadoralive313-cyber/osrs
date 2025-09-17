@@ -1331,6 +1331,81 @@ public class RoguesDenScript extends AbstractScript {
         return getEquipment() != null && getEquipment().contains(item);
     }
 
+    private boolean ensureInventorySpaceForGroundItem(String targetName) {
+        if (!Inventory.isFull()) {
+            return true;
+        }
+
+        while (Inventory.isFull()) {
+            boolean droppedItem = false;
+            int extraFlashPowder = Math.max(0, Inventory.count("Flash powder") - 1);
+
+            for (Item item : Inventory.all()) {
+                if (item == null || item.getName() == null) {
+                    continue;
+                }
+
+                String name = item.getName();
+
+                if (name.isEmpty()) {
+                    continue;
+                }
+
+                if (TOKEN_NAME.equalsIgnoreCase(name)) {
+                    continue;
+                }
+
+                if (isStaminaPotion(item)) {
+                    continue;
+                }
+
+                if (isRogueGear(name)) {
+                    continue;
+                }
+
+                if (targetName != null && targetName.equalsIgnoreCase(name)) {
+                    continue;
+                }
+
+                boolean shouldDrop = false;
+
+                if ("Vial".equalsIgnoreCase(name)) {
+                    shouldDrop = true;
+                } else if (name.contains("(0)")) {
+                    shouldDrop = true;
+                } else if ("Flash powder".equalsIgnoreCase(name) && extraFlashPowder > 0) {
+                    shouldDrop = true;
+                }
+
+                if (!shouldDrop) {
+                    continue;
+                }
+
+                if (!item.interact("Drop")) {
+                    continue;
+                }
+
+                droppedItem = true;
+
+                if ("Flash powder".equalsIgnoreCase(name) && extraFlashPowder > 0) {
+                    extraFlashPowder--;
+                }
+
+                if (Sleep.sleepUntil(() -> !Inventory.isFull(), 1800)) {
+                    return true;
+                }
+
+                break;
+            }
+
+            if (!droppedItem) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private boolean hasStaminaPotion() {
         return Inventory.contains(this::isStaminaPotion);
     }
