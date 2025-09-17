@@ -302,14 +302,14 @@ public class RoguesDenScript extends AbstractScript {
         new MazeInstruction(new Tile(3018, 5047, 1), "Crack", InstructionType.INTERACT, "Crack")
     };
 
-    private final ABCUtil abc = new ABCUtil();
+    private final ABCUtil abc;
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
     private final Area DEN_AREA = new Area(3040,4970,3050,4980,1);
     private final Tile START_TILE = new Tile(3047,4975,1);
 
     private int step = 0;
-    private Config config = new Config();
+    private Config config;
     private RoguesDenGUI gui;
     private boolean ironman;
     private boolean suppliesReady;
@@ -318,6 +318,39 @@ public class RoguesDenScript extends AbstractScript {
     private long startTime;
 
     private enum State { TRAVEL, MAZE, REST }
+
+    public RoguesDenScript() {
+        this(createABCUtil(), createConfig());
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil) {
+        this(abcUtil, createConfig());
+    }
+
+    public RoguesDenScript(Config config) {
+        this(createABCUtil(), config);
+    }
+
+    public RoguesDenScript(ABCUtil abcUtil, Config config) {
+        this.abc = ensureABCUtil(abcUtil);
+        this.config = ensureConfig(config);
+    }
+
+    private static ABCUtil createABCUtil() {
+        return new ABCUtil();
+    }
+
+    private static Config createConfig() {
+        return new Config();
+    }
+
+    private static ABCUtil ensureABCUtil(ABCUtil abcUtil) {
+        return abcUtil != null ? abcUtil : createABCUtil();
+    }
+
+    private static Config ensureConfig(Config config) {
+        return config != null ? config : createConfig();
+    }
 
     @Override
     public void onStart() {
@@ -329,6 +362,7 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
+        config = ensureConfig(config);
         ironman = getClient().isIronMan();
 
         // Initialize ABC2 reaction-time trackers once at script start
