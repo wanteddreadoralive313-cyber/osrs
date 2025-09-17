@@ -96,13 +96,16 @@ public class RoguesDenScript extends AbstractScript {
         SKIP
     }
 
-    private boolean isAtTile(Tile tile) {
-        return tile != null && getLocalPlayer().distance(tile) <= 1;
+    private boolean isAtTile(Player player, Tile tile) {
+        return player != null && tile != null && player.distance(tile) <= 1;
     }
 
     private void markStepComplete() {
         step++;
-        lastSafeTile = getLocalPlayer().getTile();
+        Player player = getLocalPlayer();
+        if (player != null) {
+            lastSafeTile = player.getTile();
+        }
         failureCount = 0;
         AntiBan.sleepReaction(abc, config);
     }
@@ -114,7 +117,10 @@ public class RoguesDenScript extends AbstractScript {
             log("Failure threshold exceeded, returning to last safe tile");
             if (lastSafeTile != null) {
                 getWalking().walk(lastSafeTile);
-                Sleep.sleepUntil(() -> isAtTile(lastSafeTile) || !getLocalPlayer().isMoving(), 6000);
+                Sleep.sleepUntil(() -> {
+                    Player player = getLocalPlayer();
+                    return player != null && (isAtTile(player, lastSafeTile) || !player.isMoving());
+                }, 6000);
             }
             failureCount = 0;
         }
@@ -166,20 +172,25 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleMoveInstruction(MazeInstruction instruction) {
-        if (isAtTile(instruction.tile)) {
+        Player player = getLocalPlayer();
+        if (isAtTile(player, instruction.tile)) {
             markStepComplete();
             return;
         }
 
-        if (!getLocalPlayer().isMoving()) {
+        if (player == null || !player.isMoving()) {
             if (!getWalking().walk(instruction.tile)) {
                 instructionFailed(instruction.label, "could not path to tile");
                 return;
             }
         }
 
-        Sleep.sleepUntil(() -> isAtTile(instruction.tile) || !getLocalPlayer().isMoving(), 6000);
-        if (isAtTile(instruction.tile)) {
+        Sleep.sleepUntil(() -> {
+            Player current = getLocalPlayer();
+            return current != null && (isAtTile(current, instruction.tile) || !current.isMoving());
+        }, 6000);
+        player = getLocalPlayer();
+        if (isAtTile(player, instruction.tile)) {
             markStepComplete();
         }
     }
@@ -214,7 +225,11 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         boolean started = Sleep.sleepUntil(
-            () -> getLocalPlayer().isMoving() || getLocalPlayer().isAnimating() || isAtTile(instruction.tile),
+            () -> {
+                Player current = getLocalPlayer();
+                return current != null
+                    && (current.isMoving() || current.isAnimating() || isAtTile(current, instruction.tile));
+            },
             3000
         );
         if (!started) {
@@ -222,7 +237,10 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        Sleep.sleepUntil(() -> !getLocalPlayer().isMoving() && !getLocalPlayer().isAnimating(), 5000);
+        Sleep.sleepUntil(() -> {
+            Player current = getLocalPlayer();
+            return current != null && !current.isMoving() && !current.isAnimating();
+        }, 5000);
         markStepComplete();
     }
 
@@ -622,33 +640,43 @@ public class RoguesDenScript extends AbstractScript {
 
         AntiBan.permute(this, abc, config);
 
+        Player local = getLocalPlayer();
+        if (local == null) {
+            return Calculations.random(200, 400);
+        }
+
         if (handleRewards()) {
             return Calculations.random(600, 900);
         }
 
-        State state = getState();
+        State state = getState(local);
         switch (state) {
             case TRAVEL:
-                handleTravel();
-                if (!DEN_AREA.contains(getLocalPlayer())) {
+                handleTravel(local);
+                Player travelPlayer = getLocalPlayer();
+                if (travelPlayer != null && !DEN_AREA.contains(travelPlayer)) {
                     getWalking().walk(START_TILE);
-                    Sleep.sleepUntil(() -> DEN_AREA.contains(getLocalPlayer()), 12000);
+                    Sleep.sleepUntil(() -> {
+                        Player player = getLocalPlayer();
+                        return player != null && DEN_AREA.contains(player);
+                    }, 12000);
                 }
                 return Calculations.random(300, 600);
             case REST:
                 handleRest();
                 return Calculations.random(600, 900);
             case MAZE:
-                if (!getLocalPlayer().isAnimating() && !getLocalPlayer().isMoving()) {
-                    handleMaze();
+                Player mazePlayer = getLocalPlayer();
+                if (mazePlayer != null && !mazePlayer.isAnimating() && !mazePlayer.isMoving()) {
+                    handleMaze(mazePlayer);
                 }
                 return Calculations.random(200, 400);
         }
         return Calculations.random(200, 400);
     }
 
-    private State getState() {
-        if (!DEN_AREA.contains(getLocalPlayer()))
+    private State getState(Player player) {
+        if (player == null || !DEN_AREA.contains(player))
             return State.TRAVEL;
         if (needsRest())
             return State.REST;
@@ -659,27 +687,28 @@ public class RoguesDenScript extends AbstractScript {
         return getWalking().getRunEnergy() < config.runThreshold;
     }
 
-    private void handleTravel() {
-        if (DEN_AREA.contains(getLocalPlayer())) {
+    private void handleTravel(Player player) {
+        if (player != null && DEN_AREA.contains(player)) {
             return;
         }
 
-        Tile lastPosition = getLocalPlayer() != null ? getLocalPlayer().getTile() : null;
+        Tile lastPosition = player != null ? player.getTile() : null;
         long lastProgressTime = System.currentTimeMillis();
         int pathFailures = 0;
         int recoveryAttempts = 0;
 
         while (true) {
-            if (getLocalPlayer() != null && DEN_AREA.contains(getLocalPlayer())) {
+            Player currentPlayer = getLocalPlayer();
+            if (currentPlayer != null && DEN_AREA.contains(currentPlayer)) {
                 return;
             }
 
-            if (getLocalPlayer() == null) {
+            if (currentPlayer == null) {
                 Sleep.sleep(300, 600);
                 continue;
             }
 
-            Tile currentTile = getLocalPlayer().getTile();
+            Tile currentTile = currentPlayer.getTile();
             if (currentTile != null && (lastPosition == null || !currentTile.equals(lastPosition))) {
                 lastPosition = currentTile;
                 lastProgressTime = System.currentTimeMillis();
@@ -698,17 +727,21 @@ public class RoguesDenScript extends AbstractScript {
                 }
 
                 lastProgressTime = System.currentTimeMillis();
-                lastPosition = getLocalPlayer().getTile();
+                Player refreshed = getLocalPlayer();
+                lastPosition = refreshed != null ? refreshed.getTile() : null;
                 pathFailures = 0;
                 continue;
             }
 
-            if (getLocalPlayer().isAnimating()) {
-                Sleep.sleepUntil(() -> !getLocalPlayer().isAnimating(), 15000);
+            if (currentPlayer.isAnimating()) {
+                Sleep.sleepUntil(() -> {
+                    Player player = getLocalPlayer();
+                    return player != null && !player.isAnimating();
+                }, 15000);
                 continue;
             }
 
-            if (getLocalPlayer().isMoving()) {
+            if (currentPlayer.isMoving()) {
                 Sleep.sleep(200, 300);
                 continue;
             }
@@ -747,7 +780,8 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean attemptTeleportToDen() {
-        if (DEN_AREA.contains(getLocalPlayer())) {
+        Player player = getLocalPlayer();
+        if (player != null && DEN_AREA.contains(player)) {
             return true;
         }
 
@@ -864,8 +898,8 @@ public class RoguesDenScript extends AbstractScript {
         Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 60000);
     }
 
-    private void handleMaze() {
-        if (getLocalPlayer().distance(START_TILE) <= 1 && step > 0) {
+    private void handleMaze(Player player) {
+        if (player != null && player.distance(START_TILE) <= 1 && step > 0) {
             recoverMaze();
             return;
         }
@@ -940,7 +974,10 @@ public class RoguesDenScript extends AbstractScript {
 
         if (Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) > before, 5000)) {
             step = 0;
-            lastSafeTile = getLocalPlayer().getTile();
+            Player player = getLocalPlayer();
+            if (player != null) {
+                lastSafeTile = player.getTile();
+            }
             failureCount = 0;
         } else {
             log("No token received from chest.");
@@ -954,7 +991,10 @@ public class RoguesDenScript extends AbstractScript {
         if (failureCount > FAILURE_THRESHOLD) {
             log("Failure threshold exceeded, returning to last safe tile");
             getWalking().walk(lastSafeTile);
-            Sleep.sleepUntil(() -> getLocalPlayer().distance(lastSafeTile) <= 2, 6000);
+            Sleep.sleepUntil(() -> {
+                Player player = getLocalPlayer();
+                return player != null && lastSafeTile != null && player.distance(lastSafeTile) <= 2;
+            }, 6000);
             step = 0;
             failureCount = 0;
         }
@@ -963,7 +1003,10 @@ public class RoguesDenScript extends AbstractScript {
     private void recoverMaze() {
         log("Recovering maze...");
         getWalking().walk(START_TILE);
-        Sleep.sleepUntil(() -> getLocalPlayer().distance(START_TILE) <= 2, 6000);
+        Sleep.sleepUntil(() -> {
+            Player player = getLocalPlayer();
+            return player != null && player.distance(START_TILE) <= 2;
+        }, 6000);
         step = 0;
         failureCount = 0;
     }
