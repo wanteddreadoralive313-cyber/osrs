@@ -46,6 +46,8 @@ public class RoguesDenScript extends AbstractScript {
 
     private static final String TOKEN_NAME = "Rogue's reward token";
     private static final String REWARD_NPC = "Rogue";
+    private static final String FLASH_POWDER_NAME = "Flash powder";
+    private static final String ROGUE_GUARD_NAME = "Rogue Guard";
     private static final String[] GEAR_ITEMS = {
         "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
     };
@@ -276,6 +278,108 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         markStepComplete();
+    }
+
+    private void handleGuardInstruction(MazeInstruction instruction) {
+        if (!Inventory.contains(FLASH_POWDER_NAME)) {
+            instructionFailed(instruction.label, "Flash powder missing");
+            return;
+        }
+
+        if (instruction.tile == null) {
+            instructionFailed(instruction.label, "missing guard tile");
+            return;
+        }
+
+        NPC guard = NPCs.closest(n ->
+            n != null
+                && ROGUE_GUARD_NAME.equals(n.getName())
+                && n.getTile() != null
+                && n.getTile().distance(instruction.tile) <= 6
+        );
+
+        if (guard == null) {
+            instructionFailed(instruction.label, "guard not found");
+            return;
+        }
+
+        if (!Tabs.isOpen(Tab.INVENTORY)) {
+            if (!Tabs.open(Tab.INVENTORY) || !Sleep.sleepUntil(() -> Tabs.isOpen(Tab.INVENTORY), 1200)) {
+                instructionFailed(instruction.label, "failed to open inventory");
+                return;
+            }
+        }
+
+        Item powder = Inventory.get(FLASH_POWDER_NAME);
+        if (powder == null) {
+            instructionFailed(instruction.label, "Flash powder missing");
+            return;
+        }
+
+        int initialCount = Inventory.count(FLASH_POWDER_NAME);
+        int initialAnimation = guard.getAnimation();
+        boolean actionInitiated = false;
+
+        if (powder.hasAction("Throw") && powder.interact("Throw")) {
+            boolean consumedOrSelected = Sleep.sleepUntil(
+                () -> Inventory.count(FLASH_POWDER_NAME) < initialCount || Inventory.isItemSelected(),
+                1500
+            );
+
+            if (!consumedOrSelected) {
+                actionInitiated = false;
+            } else if (Inventory.count(FLASH_POWDER_NAME) < initialCount) {
+                actionInitiated = true;
+            } else {
+                String selectedName = Inventory.getSelectedItemName();
+                if (selectedName != null && selectedName.equalsIgnoreCase(FLASH_POWDER_NAME)) {
+                    actionInitiated = guard.interact(action -> action != null && action.startsWith("Use"));
+                }
+            }
+        }
+
+        if (!actionInitiated) {
+            if (Inventory.isItemSelected()) {
+                Inventory.deselect();
+            }
+
+            powder = Inventory.get(FLASH_POWDER_NAME);
+            if (powder != null && powder.useOn(guard)) {
+                actionInitiated = true;
+            } else if (powder != null && powder.hasAction("Use") && powder.interact("Use")) {
+                boolean selected = Sleep.sleepUntil(Inventory::isItemSelected, 1500);
+                if (selected) {
+                    String selectedName = Inventory.getSelectedItemName();
+                    if (selectedName != null && selectedName.equalsIgnoreCase(FLASH_POWDER_NAME)) {
+                        actionInitiated = guard.interact(action -> action != null && action.startsWith("Use"));
+                    }
+                }
+            }
+        }
+
+        if (!actionInitiated) {
+            instructionFailed(instruction.label, "failed to use flash powder");
+            return;
+        }
+
+        boolean effectObserved = Sleep.sleepUntil(
+            () -> Inventory.count(FLASH_POWDER_NAME) < initialCount || isGuardStunned(guard, initialAnimation),
+            5000
+        );
+
+        if (!effectObserved) {
+            instructionFailed(instruction.label, "guard not stunned");
+            return;
+        }
+
+        markStepComplete();
+    }
+
+    private boolean isGuardStunned(NPC guard, int initialAnimation) {
+        return guard != null
+            && guard.exists()
+            && guard.isAnimating()
+            && guard.getAnimation() != initialAnimation;
     }
 
     private static class MazeInstruction {
