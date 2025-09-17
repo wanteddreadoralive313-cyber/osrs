@@ -1,7 +1,8 @@
 package org.dreambot.scripts.roguesden;
 
-import org.dreambot.api.script.AbstractScript;
+import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.methods.tabs.Tabs;
+import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.input.Mouse;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +13,7 @@ import java.lang.reflect.Field;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 class AntiBanTest {
@@ -83,6 +85,22 @@ class AntiBanTest {
     }
 
     @Test
+    void permuteHandlesMissingTabsDuringBreak() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        ABCUtil abc = mockABC();
+        AbstractScript script = mockScript();
+        when(script.getTabs()).thenReturn(null);
+
+        nextBreakField.setLong(null, 0L);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        long breakEnd = breakEndField.getLong(null);
+        assertTrue(breakEnd > System.currentTimeMillis());
+    }
+
+    @Test
     void permuteResetsTrackersAfterPermutation() throws Exception {
         RoguesDenScript.Config cfg = baseConfig();
         ABCUtil abc = mockABC();
@@ -136,6 +154,98 @@ class AntiBanTest {
         assertEquals(-1L, nextBreakField.getLong(null));
         assertEquals(-1L, breakEndField.getLong(null));
         verify(abc, never()).generateTrackers();
+    }
+
+    @Test
+    void permuteOpensInventoryTabWhenAvailable() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        ABCUtil abc = mockABC();
+        when(abc.shouldOpenTab()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        Tabs tabs = mock(Tabs.class);
+        when(script.getTabs()).thenReturn(tabs);
+
+        nextBreakField.setLong(null, Long.MAX_VALUE);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(tabs).openWithMouse(Tab.INVENTORY);
+    }
+
+    @Test
+    void permuteSkipsInventoryTabWhenUnavailable() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        ABCUtil abc = mockABC();
+        when(abc.shouldOpenTab()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        when(script.getTabs()).thenReturn(null);
+
+        nextBreakField.setLong(null, Long.MAX_VALUE);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(abc).generateTrackers();
+    }
+
+    @Test
+    void permuteSkipsHoverWhenGameObjectsMissing() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.hoverEntities = true;
+
+        ABCUtil abc = mockABC();
+        when(abc.shouldHover()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        when(script.getGameObjects()).thenReturn(null);
+
+        nextBreakField.setLong(null, Long.MAX_VALUE);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(abc).generateTrackers();
+    }
+
+    @Test
+    void permuteSkipsRandomRightClickWhenMouseMissing() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.randomRightClick = true;
+
+        ABCUtil abc = mockABC();
+        when(abc.shouldOpenMenu()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        when(script.getMouse()).thenReturn(null);
+
+        nextBreakField.setLong(null, Long.MAX_VALUE);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(abc).generateTrackers();
+    }
+
+    @Test
+    void permuteSkipsCameraActionsWhenCameraMissing() throws Exception {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.cameraPanning = true;
+
+        ABCUtil abc = mockABC();
+        when(abc.shouldRotateCamera()).thenReturn(true);
+
+        AbstractScript script = mockScript();
+        when(script.getCamera()).thenReturn(null);
+
+        nextBreakField.setLong(null, Long.MAX_VALUE);
+        breakEndField.setLong(null, -1L);
+
+        AntiBan.permute(script, abc, cfg);
+
+        verify(abc).generateTrackers();
     }
 
     @Test
