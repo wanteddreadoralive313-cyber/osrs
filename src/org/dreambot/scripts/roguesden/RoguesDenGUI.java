@@ -12,7 +12,8 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-        setSize(280, 360);
+setSize(280, 360); // accommodate added controls; remove conflict markers
+
         setLayout(new GridLayout(0, 1));
 
         addWindowListener(new WindowAdapter() {
@@ -61,6 +62,12 @@ public class RoguesDenGUI extends JFrame {
         runRestorePanel.add(new JLabel("Run restore:"));
         runRestorePanel.add(runRestoreField);
 
+        JPanel routePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        routePanel.add(new JLabel("Maze route:"));
+        JComboBox<RoguesDenScript.Config.ShortcutMode> shortcutMode = new JComboBox<>(RoguesDenScript.Config.ShortcutMode.values());
+        shortcutMode.setSelectedItem(config.shortcutMode);
+        routePanel.add(shortcutMode);
+
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         breakIntervalPanel.add(new JLabel("Break interval (min):"));
@@ -87,8 +94,9 @@ public class RoguesDenGUI extends JFrame {
             config.hoverEntities = hover.isSelected();
             config.randomRightClick = rightClick.isSelected();
             config.cameraPanning = camera.isSelected();
-            config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
-            config.stopAfterFullSet = stopAfterSet.isSelected();
+config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
+config.stopAfterFullSet = stopAfterSet.isSelected();
+config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
@@ -169,6 +177,7 @@ public class RoguesDenGUI extends JFrame {
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);
+        add(routePanel);
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);
