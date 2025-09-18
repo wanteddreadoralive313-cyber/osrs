@@ -12,7 +12,8 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-setSize(280, 360); // accommodate added controls; remove conflict markers
+setSize(320, 400); // accommodate added stamina/route/HP-Food controls
+
 
         setLayout(new GridLayout(0, 1));
 
@@ -27,6 +28,14 @@ setSize(280, 360); // accommodate added controls; remove conflict markers
         // Common checkboxes
         JCheckBox stamina = new JCheckBox("Use stamina potions", config.useStamina);
         JCheckBox antiban = new JCheckBox("Enable anti-ban", config.antiban);
+
+        JPanel staminaPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        staminaPanel.add(new JLabel("Stamina doses carry:"));
+        JTextField staminaTargetField = new JTextField(String.valueOf(config.staminaDoseTarget), 3);
+        staminaPanel.add(staminaTargetField);
+        staminaPanel.add(new JLabel("restock <"));
+        JTextField staminaThresholdField = new JTextField(String.valueOf(config.staminaDoseThreshold), 3);
+        staminaPanel.add(staminaThresholdField);
 
         // Anti-ban behavior toggles (merge from other branch)
         JCheckBox hover = new JCheckBox("Hover entities", config.hoverEntities);
@@ -101,6 +110,7 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
             int bIntMin, bIntMax, bLenMin, bLenMax;
+            int staminaTarget, staminaThreshold;
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -120,10 +130,12 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
                 bIntMax = Integer.parseInt(breakIntervalMax.getText().trim());
                 bLenMin = Integer.parseInt(breakLengthMin.getText().trim());
                 bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
+                staminaTarget = Integer.parseInt(staminaTargetField.getText().trim());
+                staminaThreshold = Integer.parseInt(staminaThresholdField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break values must be integers.",
+                        "Run/break/stamina values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -139,7 +151,9 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
                     bIntMin,
                     bIntMax,
                     bLenMin,
-                    bLenMax
+                    bLenMax,
+                    staminaTarget,
+                    staminaThreshold
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -160,6 +174,8 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
             config.breakIntervalMax = bIntMax;
             config.breakLengthMin = bLenMin;
             config.breakLengthMax = bLenMax;
+            config.staminaDoseTarget = staminaTarget;
+            config.staminaDoseThreshold = staminaThreshold;
 
             cancelled.set(false);
             done.set(true);
@@ -168,6 +184,7 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
         });
 
         add(stamina);
+        add(staminaPanel);
         add(antiban);
         add(hover);
         add(rightClick);

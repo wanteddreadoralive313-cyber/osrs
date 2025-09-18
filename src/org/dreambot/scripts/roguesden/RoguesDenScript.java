@@ -52,6 +52,8 @@ public class RoguesDenScript extends AbstractScript {
         "Rogue mask", "Rogue top", "Rogue trousers", "Rogue gloves", "Rogue boots"
     };
 
+    private static final int STAMINA_DOSES_PER_POTION = 4;
+
     private static final int FAILURE_THRESHOLD = 3;
     private static final int BANK_INTERACTION_RANGE = 15;
 
@@ -663,7 +665,9 @@ public class RoguesDenScript extends AbstractScript {
             cfg.breakIntervalMin,
             cfg.breakIntervalMax,
             cfg.breakLengthMin,
-            cfg.breakLengthMax
+            cfg.breakLengthMax,
+            cfg.staminaDoseTarget,
+            cfg.staminaDoseThreshold
         );
         if (error != null) {
             log(error);
@@ -965,7 +969,12 @@ public class RoguesDenScript extends AbstractScript {
         log("Waiting for run energy...");
         if (config.useStamina) {
             Item stamina = getStaminaPotion();
-            if (stamina != null && stamina.interact("Drink")) {
+            if (stamina == null) {
+                log("Out of stamina potions; restocking.");
+                suppliesReady = false;
+                return;
+            }
+            if (stamina.interact("Drink")) {
                 Sleep.sleepUntil(() -> getWalking().getRunEnergy() > config.runRestore, 3000);
                 return;
             }
@@ -1349,17 +1358,16 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         if (config.useStamina) {
-            Item stamina = getStaminaPotion();
-            if (stamina == null) {
-                if (!bankOpened && !ensureBankOpen("withdraw a stamina potion")) {
+            int currentDoses = getStaminaDoseCount();
+            int potionsNeeded = getRequiredStaminaPotions(currentDoses);
+            if (potionsNeeded > 0) {
+                if (!bankOpened && !ensureBankOpen("withdraw stamina potions")) {
                     return false;
                 }
                 bankOpened = true;
-                if (getBank().contains(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"))) {
-                    getBank().withdraw(i -> i != null && i.getName() != null && i.getName().contains("Stamina potion"), 1);
-                    Sleep.sleepUntil(() -> Inventory.contains(this::isStaminaPotion), 2000);
-                } else {
-                    log("No stamina potions available in bank.");
+                if (!withdrawStaminaPotions(potionsNeeded)) {
+                    closeBank();
+                    return false;
                 }
             }
         }
@@ -1513,7 +1521,7 @@ public class RoguesDenScript extends AbstractScript {
         if (!hasFullRogueSetEquipped()) {
             return false;
         }
-        if (config.useStamina && !hasStaminaPotion()) {
+        if (config.useStamina && shouldRestockStamina(getStaminaDoseCount())) {
             return false;
         }
         return true;
@@ -1607,16 +1615,90 @@ public class RoguesDenScript extends AbstractScript {
         return true;
     }
 
-    private boolean hasStaminaPotion() {
-        return Inventory.contains(this::isStaminaPotion);
-    }
-
     private Item getStaminaPotion() {
         return Inventory.get(this::isStaminaPotion);
     }
 
     private boolean isStaminaPotion(Item item) {
         return item != null && item.getName() != null && item.getName().contains("Stamina potion");
+    }
+
+    private int getStaminaDoseCount() {
+        int total = 0;
+        for (Item item : Inventory.all()) {
+            if (!isStaminaPotion(item)) {
+                continue;
+            }
+            total += getStaminaDoses(item);
+        }
+        return total;
+    }
+
+    private int getStaminaDoses(Item item) {
+        if (item == null) {
+            return 0;
+        }
+        String name = item.getName();
+        if (name == null) {
+            return 0;
+        }
+        int start = name.indexOf('(');
+        int end = name.indexOf(')', start + 1);
+        if (start == -1 || end == -1 || end <= start + 1) {
+            return 0;
+        }
+        String doseText = name.substring(start + 1, end);
+        try {
+            return Integer.parseInt(doseText);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private boolean withdrawStaminaPotions(int potionsToWithdraw) {
+        if (potionsToWithdraw <= 0) {
+            return true;
+        }
+        if (!getBank().contains(this::isStaminaPotion)) {
+            log("No stamina potions available in bank.");
+            return true;
+        }
+
+        for (int i = 0; i < potionsToWithdraw; i++) {
+            if (!getBank().contains(this::isStaminaPotion)) {
+                log("Insufficient stamina potions remaining in bank to reach configured target.");
+                break;
+            }
+            int before = getStaminaDoseCount();
+            getBank().withdraw(this::isStaminaPotion, 1);
+            if (!Sleep.sleepUntil(() -> getStaminaDoseCount() > before, 2000)) {
+                log("Failed to confirm stamina potion withdrawal.");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    int getRequiredStaminaPotions(int currentDoseCount) {
+        if (!config.useStamina) {
+            return 0;
+        }
+        int deficit = config.staminaDoseTarget - currentDoseCount;
+        if (deficit <= 0) {
+            return 0;
+        }
+        return (deficit + STAMINA_DOSES_PER_POTION - 1) / STAMINA_DOSES_PER_POTION;
+    }
+
+    boolean shouldRestockStamina(int currentDoseCount) {
+        if (!config.useStamina) {
+            return false;
+        }
+        if (currentDoseCount <= 0) {
+            return true;
+        }
+        return currentDoseCount < config.staminaDoseThreshold;
     }
 
     // Methods below are package-private to facilitate unit testing
@@ -1675,6 +1757,18 @@ public class RoguesDenScript extends AbstractScript {
          * True enables potion usage, false avoids it.
          */
         boolean useStamina = true;
+
+        /**
+         * Target number of stamina potion doses to carry after banking.
+         * Must be non-negative and greater than or equal to {@link #staminaDoseThreshold}.
+         */
+        int staminaDoseTarget = 12;
+
+        /**
+         * Minimum stamina potion doses to maintain before restocking.
+         * Must be non-negative and less than or equal to {@link #staminaDoseTarget}.
+         */
+        int staminaDoseThreshold = 4;
 
         /**
          * Enables ABC2 anti-ban behavior such as reaction time tracking.
