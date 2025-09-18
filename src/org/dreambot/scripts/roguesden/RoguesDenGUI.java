@@ -12,7 +12,7 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-        setSize(280, 320);
+        setSize(320, 400);
         setLayout(new GridLayout(0, 1));
 
         addWindowListener(new WindowAdapter() {
@@ -52,6 +52,24 @@ public class RoguesDenGUI extends JFrame {
         runRestorePanel.add(new JLabel("Run restore:"));
         runRestorePanel.add(runRestoreField);
 
+        // HP controls
+        JPanel hpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        hpPanel.add(new JLabel("Eat HP ≤"));
+        JTextField hpEatField = new JTextField(String.valueOf(config.hpEatThreshold), 3);
+        hpPanel.add(hpEatField);
+        hpPanel.add(new JLabel("Flee HP ≤"));
+        JTextField hpFleeField = new JTextField(String.valueOf(config.hpFleeThreshold), 3);
+        hpPanel.add(hpFleeField);
+
+        // Food controls
+        JPanel foodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        foodPanel.add(new JLabel("Food:"));
+        JTextField foodNameField = new JTextField(config.foodName, 8);
+        foodPanel.add(foodNameField);
+        foodPanel.add(new JLabel("Qty:"));
+        JTextField foodQuantityField = new JTextField(String.valueOf(config.foodQuantity), 3);
+        foodPanel.add(foodQuantityField);
+
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         breakIntervalPanel.add(new JLabel("Break interval (min):"));
@@ -81,7 +99,9 @@ public class RoguesDenGUI extends JFrame {
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
+            int hpEat, hpFlee;
             int bIntMin, bIntMax, bLenMin, bLenMax;
+            int foodQuantity;
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -97,14 +117,17 @@ public class RoguesDenGUI extends JFrame {
             try {
                 threshold = Integer.parseInt(runThresholdField.getText().trim());
                 restore = Integer.parseInt(runRestoreField.getText().trim());
+                hpEat = Integer.parseInt(hpEatField.getText().trim());
+                hpFlee = Integer.parseInt(hpFleeField.getText().trim());
                 bIntMin = Integer.parseInt(breakIntervalMin.getText().trim());
                 bIntMax = Integer.parseInt(breakIntervalMax.getText().trim());
                 bLenMin = Integer.parseInt(breakLengthMin.getText().trim());
                 bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
+                foodQuantity = Integer.parseInt(foodQuantityField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break values must be integers.",
+                        "Run/break/HP/food values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -120,7 +143,11 @@ public class RoguesDenGUI extends JFrame {
                     bIntMin,
                     bIntMax,
                     bLenMin,
-                    bLenMax
+                    bLenMax,
+                    hpEat,
+                    hpFlee,
+                    foodQuantity,
+                    foodNameField.getText().trim()
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -141,6 +168,10 @@ public class RoguesDenGUI extends JFrame {
             config.breakIntervalMax = bIntMax;
             config.breakLengthMin = bLenMin;
             config.breakLengthMax = bLenMax;
+            config.hpEatThreshold = hpEat;
+            config.hpFleeThreshold = hpFlee;
+            config.foodQuantity = foodQuantity;
+            config.foodName = foodNameField.getText().trim();
 
             cancelled.set(false);
             done.set(true);
@@ -156,6 +187,8 @@ public class RoguesDenGUI extends JFrame {
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);
+        add(hpPanel);
+        add(foodPanel);
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);

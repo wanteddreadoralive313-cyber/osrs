@@ -38,8 +38,9 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
 public class RoguesDenScript extends AbstractScript {
@@ -597,12 +598,17 @@ public class RoguesDenScript extends AbstractScript {
             cfg.breakIntervalMin,
             cfg.breakIntervalMax,
             cfg.breakLengthMin,
-            cfg.breakLengthMax
+            cfg.breakLengthMax,
+            cfg.hpEatThreshold,
+            cfg.hpFleeThreshold,
+            cfg.foodQuantity,
+            cfg.foodName != null ? cfg.foodName.trim() : ""
         );
         if (error != null) {
             log(error);
             return false;
         }
+        cfg.foodName = cfg.foodName != null ? cfg.foodName.trim() : "";
         return true;
     }
 
@@ -645,6 +651,10 @@ public class RoguesDenScript extends AbstractScript {
 
         if (!getWalking().isRunEnabled() && getWalking().getRunEnergy() >= config.runRestore) {
             getWalking().toggleRun(true);
+        }
+
+        if (!ensureHealthSafe()) {
+            return Calculations.random(300, 600);
         }
 
         AntiBan.permute(this, abc, config);
@@ -908,6 +918,10 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private void handleMaze(Player player) {
+        if (!ensureHealthSafe()) {
+            return;
+        }
+
         if (player != null && player.distance(START_TILE) <= 1 && step > 0) {
             recoverMaze();
             return;
@@ -1268,6 +1282,44 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
+        if (requiresFood()) {
+            if (config.foodQuantity < 1) {
+                log("Food quantity must be greater than zero when food is enabled.");
+                closeBank();
+                return false;
+            }
+
+            if (!bankOpened && !ensureBankOpen("withdraw food")) {
+                return false;
+            }
+
+            bankOpened = true;
+
+            if (!getBank().contains(item -> isFoodItem(item != null ? item.getName() : null))) {
+                log("Missing configured food: " + config.foodName);
+                closeBank();
+                return false;
+            }
+
+            int currentFood = Inventory.count(this::isFoodItem);
+            int needed = config.foodQuantity - currentFood;
+            while (needed > 0) {
+                int before = Inventory.count(this::isFoodItem);
+                if (!getBank().withdraw(config.foodName, needed)) {
+                    log("Failed to withdraw enough " + config.foodName + ".");
+                    closeBank();
+                    return false;
+                }
+                if (!Sleep.sleepUntil(() -> Inventory.count(this::isFoodItem) > before, 2000)) {
+                    log("Timed out waiting for " + config.foodName + " withdrawal.");
+                    closeBank();
+                    return false;
+                }
+                currentFood = Inventory.count(this::isFoodItem);
+                needed = config.foodQuantity - currentFood;
+            }
+        }
+
         if (bankOpened) {
             if (Inventory.contains("Vial")) {
                 getBank().depositAll("Vial");
@@ -1420,6 +1472,9 @@ public class RoguesDenScript extends AbstractScript {
         if (config.useStamina && !hasStaminaPotion()) {
             return false;
         }
+        if (requiresFood() && !hasFood()) {
+            return false;
+        }
         return true;
     }
 
@@ -1465,6 +1520,10 @@ public class RoguesDenScript extends AbstractScript {
                 }
 
                 if (isRogueGear(name)) {
+                    continue;
+                }
+
+                if (isFoodItem(name)) {
                     continue;
                 }
 
@@ -1521,6 +1580,115 @@ public class RoguesDenScript extends AbstractScript {
 
     private boolean isStaminaPotion(Item item) {
         return item != null && item.getName() != null && item.getName().contains("Stamina potion");
+    }
+
+    private boolean ensureHealthSafe() {
+        if (!requiresFood()) {
+            return true;
+        }
+
+        if (!hasFood()) {
+            handleOutOfFood();
+            return false;
+        }
+
+        boolean healed = handleLowHealth(this::getHealthPercent, this::getFoodItem, this::handleOutOfFood);
+        if (!healed) {
+            if (suppliesReady) {
+                log("Unable to restore health; pausing to restock.");
+                suppliesReady = false;
+            }
+            return false;
+        }
+
+        if (!hasFood()) {
+            handleOutOfFood();
+            return false;
+        }
+
+        return true;
+    }
+
+    private int getHealthPercent() {
+        int real = getSkills().getRealLevel(Skill.HITPOINTS);
+        if (real <= 0) {
+            return 0;
+        }
+        int current = getSkills().getBoostedLevels(Skill.HITPOINTS);
+        return Math.min(100, Math.max(0, (int) Math.round((current * 100.0) / real)));
+    }
+
+    private boolean hasFood() {
+        return Inventory.contains(this::isFoodItem);
+    }
+
+    private Item getFoodItem() {
+        return Inventory.get(this::isFoodItem);
+    }
+
+    private boolean isFoodItem(Item item) {
+        return item != null && isFoodItem(item.getName());
+    }
+
+    private boolean isFoodItem(String name) {
+        String configured = config.foodName != null ? config.foodName.trim() : "";
+        return requiresFood()
+            && name != null
+            && name.equalsIgnoreCase(configured);
+    }
+
+    private boolean requiresFood() {
+        return config.foodQuantity > 0
+            && config.foodName != null
+            && !config.foodName.trim().isEmpty();
+    }
+
+    private void handleOutOfFood() {
+        if (!requiresFood()) {
+            return;
+        }
+
+        if (!suppliesReady) {
+            return;
+        }
+
+        suppliesReady = false;
+        log("Out of food (" + config.foodName + ") - aborting run to restock.");
+
+        Player player = getLocalPlayer();
+        int hpPercent = getHealthPercent();
+        if (player != null && DEN_AREA.contains(player) && hpPercent <= config.hpFleeThreshold) {
+            if (!attemptTeleportToSafety()) {
+                stopScriptWithMessage("Unable to teleport to safety after running out of food.");
+            }
+        }
+    }
+
+    boolean handleLowHealth(IntSupplier hpSupplier,
+                            Supplier<Item> foodSupplier,
+                            Runnable outOfFoodAction) {
+        int hpPercent = hpSupplier.getAsInt();
+        if (hpPercent > config.hpEatThreshold) {
+            return true;
+        }
+
+        while (hpPercent <= config.hpEatThreshold) {
+            Item food = foodSupplier.get();
+            if (food == null) {
+                outOfFoodAction.run();
+                return false;
+            }
+
+            if (!food.interact("Eat")) {
+                return false;
+            }
+
+            final int before = hpPercent;
+            Sleep.sleepUntil(() -> hpSupplier.getAsInt() > before, 1800);
+            hpPercent = hpSupplier.getAsInt();
+        }
+
+        return true;
     }
 
     // Methods below are package-private to facilitate unit testing
@@ -1611,5 +1779,29 @@ public class RoguesDenScript extends AbstractScript {
          * Must be greater than or equal to {@link #breakLengthMin}.
          */
         int breakLengthMax = 5;    // minutes
+
+        /**
+         * Name of the food item to withdraw from the bank.
+         * Leave blank to disable food usage.
+         */
+        String foodName = "Monkfish";
+
+        /**
+         * Number of food items to withdraw before each run.
+         * Must be positive when {@link #foodName} is not blank.
+         */
+        int foodQuantity = 12;
+
+        /**
+         * Health percentage at or below which food should be eaten.
+         * Must be between 0 and 100 and greater than or equal to {@link #hpFleeThreshold}.
+         */
+        int hpEatThreshold = 50;
+
+        /**
+         * Critical health percentage that triggers an emergency retreat when no food remains.
+         * Must be between 0 and 100 and less than or equal to {@link #hpEatThreshold}.
+         */
+        int hpFleeThreshold = 25;
     }
 }
