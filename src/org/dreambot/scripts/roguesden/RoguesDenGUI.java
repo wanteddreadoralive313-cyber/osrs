@@ -12,7 +12,7 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-        setSize(280, 320);
+        setSize(300, 360);
         setLayout(new GridLayout(0, 1));
 
         addWindowListener(new WindowAdapter() {
@@ -26,6 +26,14 @@ public class RoguesDenGUI extends JFrame {
         // Common checkboxes
         JCheckBox stamina = new JCheckBox("Use stamina potions", config.useStamina);
         JCheckBox antiban = new JCheckBox("Enable anti-ban", config.antiban);
+
+        JPanel staminaPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        staminaPanel.add(new JLabel("Stamina doses carry:"));
+        JTextField staminaTargetField = new JTextField(String.valueOf(config.staminaDoseTarget), 3);
+        staminaPanel.add(staminaTargetField);
+        staminaPanel.add(new JLabel("restock <"));
+        JTextField staminaThresholdField = new JTextField(String.valueOf(config.staminaDoseThreshold), 3);
+        staminaPanel.add(staminaThresholdField);
 
         // Anti-ban behavior toggles (merge from other branch)
         JCheckBox hover = new JCheckBox("Hover entities", config.hoverEntities);
@@ -82,6 +90,7 @@ public class RoguesDenGUI extends JFrame {
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
             int bIntMin, bIntMax, bLenMin, bLenMax;
+            int staminaTarget, staminaThreshold;
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -101,10 +110,12 @@ public class RoguesDenGUI extends JFrame {
                 bIntMax = Integer.parseInt(breakIntervalMax.getText().trim());
                 bLenMin = Integer.parseInt(breakLengthMin.getText().trim());
                 bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
+                staminaTarget = Integer.parseInt(staminaTargetField.getText().trim());
+                staminaThreshold = Integer.parseInt(staminaThresholdField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break values must be integers.",
+                        "Run/break/stamina values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -120,7 +131,9 @@ public class RoguesDenGUI extends JFrame {
                     bIntMin,
                     bIntMax,
                     bLenMin,
-                    bLenMax
+                    bLenMax,
+                    staminaTarget,
+                    staminaThreshold
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -141,6 +154,8 @@ public class RoguesDenGUI extends JFrame {
             config.breakIntervalMax = bIntMax;
             config.breakLengthMin = bLenMin;
             config.breakLengthMax = bLenMax;
+            config.staminaDoseTarget = staminaTarget;
+            config.staminaDoseThreshold = staminaThreshold;
 
             cancelled.set(false);
             done.set(true);
@@ -149,6 +164,7 @@ public class RoguesDenGUI extends JFrame {
         });
 
         add(stamina);
+        add(staminaPanel);
         add(antiban);
         add(hover);
         add(rightClick);
