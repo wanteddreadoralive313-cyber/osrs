@@ -12,7 +12,8 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-        setSize(320, 400);
+setSize(320, 400); // accommodate added controls
+
         setLayout(new GridLayout(0, 1));
 
         addWindowListener(new WindowAdapter() {
@@ -31,6 +32,15 @@ public class RoguesDenGUI extends JFrame {
         JCheckBox hover = new JCheckBox("Hover entities", config.hoverEntities);
         JCheckBox rightClick = new JCheckBox("Random right-clicks", config.randomRightClick);
         JCheckBox camera = new JCheckBox("Camera panning", config.cameraPanning);
+
+        JPanel rewardPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        rewardPanel.add(new JLabel("Reward:"));
+        JComboBox<RoguesDenScript.Config.RewardTarget> rewardChoice =
+                new JComboBox<>(RoguesDenScript.Config.RewardTarget.values());
+        rewardChoice.setSelectedItem(config.rewardTarget);
+        rewardPanel.add(rewardChoice);
+
+        JCheckBox stopAfterSet = new JCheckBox("Stop after rogue set", config.stopAfterFullSet);
 
         // Idle timing (from enhance branch)
         JPanel idlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -52,23 +62,32 @@ public class RoguesDenGUI extends JFrame {
         runRestorePanel.add(new JLabel("Run restore:"));
         runRestorePanel.add(runRestoreField);
 
-        // HP controls
-        JPanel hpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        hpPanel.add(new JLabel("Eat HP ≤"));
-        JTextField hpEatField = new JTextField(String.valueOf(config.hpEatThreshold), 3);
-        hpPanel.add(hpEatField);
-        hpPanel.add(new JLabel("Flee HP ≤"));
-        JTextField hpFleeField = new JTextField(String.valueOf(config.hpFleeThreshold), 3);
-        hpPanel.add(hpFleeField);
+// HP controls (from codex/extend-food-settings-and-integrate-hp-checks)
+JPanel hpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+hpPanel.add(new JLabel("Eat HP ≤"));
+JTextField hpEatField = new JTextField(String.valueOf(config.hpEatThreshold), 3);
+hpPanel.add(hpEatField);
+hpPanel.add(new JLabel("Flee HP ≤"));
+JTextField hpFleeField = new JTextField(String.valueOf(config.hpFleeThreshold), 3);
+hpPanel.add(hpFleeField);
 
-        // Food controls
-        JPanel foodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        foodPanel.add(new JLabel("Food:"));
-        JTextField foodNameField = new JTextField(config.foodName, 8);
-        foodPanel.add(foodNameField);
-        foodPanel.add(new JLabel("Qty:"));
-        JTextField foodQuantityField = new JTextField(String.valueOf(config.foodQuantity), 3);
-        foodPanel.add(foodQuantityField);
+// Food controls (from codex/extend-food-settings-and-integrate-hp-checks)
+JPanel foodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+foodPanel.add(new JLabel("Food:"));
+JTextField foodNameField = new JTextField(config.foodName, 8);
+foodPanel.add(foodNameField);
+foodPanel.add(new JLabel("Qty:"));
+JTextField foodQuantityField = new JTextField(String.valueOf(config.foodQuantity), 3);
+foodPanel.add(foodQuantityField);
+
+// Maze route controls (from main)
+JPanel routePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+routePanel.add(new JLabel("Maze route:"));
+JComboBox<RoguesDenScript.Config.ShortcutMode> shortcutMode =
+        new JComboBox<>(RoguesDenScript.Config.ShortcutMode.values());
+shortcutMode.setSelectedItem(config.shortcutMode);
+routePanel.add(shortcutMode);
+
 
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -96,6 +115,9 @@ public class RoguesDenGUI extends JFrame {
             config.hoverEntities = hover.isSelected();
             config.randomRightClick = rightClick.isSelected();
             config.cameraPanning = camera.isSelected();
+config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
+config.stopAfterFullSet = stopAfterSet.isSelected();
+config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
@@ -184,11 +206,35 @@ public class RoguesDenGUI extends JFrame {
         add(hover);
         add(rightClick);
         add(camera);
+        add(rewardPanel);
+        add(stopAfterSet);
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);
-        add(hpPanel);
-        add(foodPanel);
+// Persist stop-after-full-set
+config.stopAfterFullSet = stopAfterSet.isSelected();
+
+// Persist route selection (from main)
+config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
+
+// Persist HP/Food settings (from codex/extend-food-settings-and-integrate-hp-checks)
+try {
+    config.hpEatThreshold = Integer.parseInt(hpEatField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
+try {
+    config.hpFleeThreshold = Integer.parseInt(hpFleeField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
+String foodNameText = foodNameField.getText().trim();
+if (!foodNameText.isEmpty()) {
+    config.foodName = foodNameText;
+}
+
+try {
+    config.foodQuantity = Integer.parseInt(foodQuantityField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);

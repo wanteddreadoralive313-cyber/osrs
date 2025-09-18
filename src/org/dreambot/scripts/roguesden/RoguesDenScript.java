@@ -88,6 +88,11 @@ public class RoguesDenScript extends AbstractScript {
         new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET)
     };
 
+    enum MazeRoute {
+        LONG,
+        SHORTCUT
+    }
+
     private enum InstructionType {
         HINT,
         MOVE,
@@ -415,10 +420,22 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private static final List<MazeInstruction> MAZE_PATH = Collections.unmodifiableList(loadMazePath());
+    private static class MazePaths {
+        final List<MazeInstruction> longRoute;
+        final List<MazeInstruction> shortcutRoute;
 
-    private static List<MazeInstruction> loadMazePath() {
-        List<MazeInstruction> instructions = new ArrayList<>();
+        MazePaths(List<MazeInstruction> longRoute, List<MazeInstruction> shortcutRoute) {
+            this.longRoute = Collections.unmodifiableList(new ArrayList<>(longRoute));
+            this.shortcutRoute = Collections.unmodifiableList(new ArrayList<>(shortcutRoute));
+        }
+    }
+
+    private static final MazePaths MAZE_PATHS = loadMazePaths();
+
+    private static MazePaths loadMazePaths() {
+        List<MazeInstruction> longRoute = new ArrayList<>();
+        List<MazeInstruction> shortcutRoute = new ArrayList<>();
+        List<MazeInstruction> target = longRoute;
         try (InputStream stream = RoguesDenScript.class.getResourceAsStream("maze_path.csv")) {
             if (stream == null) {
                 throw new IllegalStateException("Unable to locate maze_path.csv resource");
@@ -430,7 +447,22 @@ public class RoguesDenScript extends AbstractScript {
                 while ((line = reader.readLine()) != null) {
                     lineNumber++;
                     line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) {
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+
+                    if (line.startsWith("#")) {
+                        String lower = line.toLowerCase(Locale.ROOT);
+                        if (lower.startsWith("# route:")) {
+                            String routeName = lower.substring("# route:".length()).trim();
+                            if ("long".equals(routeName)) {
+                                target = longRoute;
+                            } else if ("shortcut".equals(routeName)) {
+                                target = shortcutRoute;
+                            } else {
+                                throw new IllegalStateException("Unknown maze route '" + routeName + "' on line " + lineNumber);
+                            }
+                        }
                         continue;
                     }
 
@@ -447,18 +479,21 @@ public class RoguesDenScript extends AbstractScript {
                         data = null;
                     }
 
-                    instructions.add(new MazeInstruction(tile, label, type, data));
+                    target.add(new MazeInstruction(tile, label, type, data));
                 }
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load maze_path.csv", e);
         }
 
-        if (instructions.isEmpty()) {
-            throw new IllegalStateException("No maze instructions loaded from maze_path.csv");
+        if (longRoute.isEmpty()) {
+            throw new IllegalStateException("No long route instructions loaded from maze_path.csv");
+        }
+        if (shortcutRoute.isEmpty()) {
+            throw new IllegalStateException("No shortcut route instructions loaded from maze_path.csv");
         }
 
-        return instructions;
+        return new MazePaths(longRoute, shortcutRoute);
     }
 
     private static Tile parseTile(String raw, int lineNumber) {
@@ -493,6 +528,36 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
+    private List<MazeInstruction> getMazePath(MazeRoute route) {
+        return route == MazeRoute.SHORTCUT ? MAZE_PATHS.shortcutRoute : MAZE_PATHS.longRoute;
+    }
+
+    private List<MazeInstruction> getActiveMazePath() {
+        return getMazePath(activeMazeRoute);
+    }
+
+    private int getActiveMazePathSize() {
+        return getActiveMazePath().size();
+    }
+
+    MazeRoute determineMazeRouteForLevel(int thievingLevel) {
+        boolean useShortcut = config != null && config.shouldUseShortcut(thievingLevel);
+        if (useShortcut && !MAZE_PATHS.shortcutRoute.isEmpty()) {
+            return MazeRoute.SHORTCUT;
+        }
+        return MazeRoute.LONG;
+    }
+
+    private void ensureActiveMazeRouteSelected() {
+        if (step == 0) {
+            activeMazeRoute = determineMazeRouteForLevel(getThievingLevel());
+        }
+    }
+
+    protected int getThievingLevel() {
+        return getSkills().getRealLevel(Skill.THIEVING);
+    }
+
     private final ABCUtil abc;
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
@@ -509,6 +574,7 @@ public class RoguesDenScript extends AbstractScript {
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
+    private MazeRoute activeMazeRoute = MazeRoute.LONG;
 
     private enum State { TRAVEL, MAZE, REST }
 
@@ -585,7 +651,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean meetsRequirements() {
-        return getSkills().getRealLevel(Skill.THIEVING) >= 50
+        return getThievingLevel() >= 50
             && getSkills().getRealLevel(Skill.AGILITY) >= 50;
     }
 
@@ -927,12 +993,15 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        if (step >= MAZE_PATH.size()) {
+        ensureActiveMazeRouteSelected();
+        List<MazeInstruction> path = getActiveMazePath();
+
+        if (step >= path.size()) {
             handleChest();
             return;
         }
 
-        MazeInstruction current = MAZE_PATH.get(step);
+        MazeInstruction current = path.get(step);
         switch (current.type) {
             case SKIP:
                 step++;
@@ -1034,11 +1103,15 @@ public class RoguesDenScript extends AbstractScript {
         failureCount = 0;
     }
 
-    private boolean handleRewards() {
+    boolean handleRewards() {
         return handleRewards(false);
     }
 
     private boolean handleRewards(boolean retriedAfterDelay) {
+        if (config.rewardTarget == Config.RewardTarget.KEEP_TOKENS) {
+            return false;
+        }
+
         if (Inventory.count(TOKEN_NAME) < 1) {
             return false;
         }
@@ -1048,7 +1121,9 @@ public class RoguesDenScript extends AbstractScript {
             if (npc != null && npc.interact("Claim")) {
                 boolean success = handleRewardDialogue();
                 if (success) {
-                    if (hasFullRogueSet()) {
+                    if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
+                        && config.stopAfterFullSet
+                        && hasFullRogueSet()) {
                         log("Full rogue set obtained. Stopping script.");
                         ScriptManager.getScriptManager().stop();
                     }
@@ -1077,7 +1152,7 @@ public class RoguesDenScript extends AbstractScript {
         return true;
     }
 
-    private boolean handleRewardDialogue() {
+    protected boolean handleRewardDialogue() {
         Sleep.sleepUntil(() -> getDialogues().inDialogue()
                 || getDialogues().areOptionsAvailable()
                 || getDialogues().canContinue()
@@ -1087,7 +1162,7 @@ public class RoguesDenScript extends AbstractScript {
 
         long timeout = System.currentTimeMillis() + 12000;
         while (System.currentTimeMillis() < timeout) {
-            if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
+            if (hasReceivedTargetReward()) {
                 return true;
             }
 
@@ -1106,8 +1181,17 @@ public class RoguesDenScript extends AbstractScript {
             }
 
             if (getDialogues().areOptionsAvailable()) {
-                if (getDialogues().chooseOption("Rogue equipment")
-                    || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
+                String option = config.rewardTarget.getDialogueOptionText();
+                String containsText = config.rewardTarget.getDialogueContainsText();
+                boolean handled = false;
+                if (option != null && getDialogues().chooseOption(option)) {
+                    handled = true;
+                } else if (containsText != null
+                    && getDialogues().chooseFirstOptionContaining(containsText)) {
+                    handled = true;
+                }
+
+                if (handled) {
                     Sleep.sleep(300, 600);
                     continue;
                 }
@@ -1126,7 +1210,19 @@ public class RoguesDenScript extends AbstractScript {
             Sleep.sleep(150, 300);
         }
 
-        return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
+        return hasReceivedTargetReward();
+    }
+
+    boolean hasReceivedTargetReward() {
+        switch (config.rewardTarget) {
+            case ROGUE_EQUIPMENT:
+                return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
+            case ROGUE_KIT:
+                return Inventory.contains("Rogue kit");
+            case KEEP_TOKENS:
+            default:
+                return false;
+        }
     }
 
     private boolean disposeTokens() {
@@ -1186,7 +1282,7 @@ public class RoguesDenScript extends AbstractScript {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
     }
 
-    private boolean hasFullRogueSet() {
+    boolean hasFullRogueSet() {
         List<String> missing = new ArrayList<>();
         for (String item : GEAR_ITEMS) {
             if (getEquipment() != null && getEquipment().contains(item)) {
@@ -1450,7 +1546,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Runtime: " + formatTime(System.currentTimeMillis() - startTime), 10, y);
         y += 15;
-        g.drawString("Step: " + step + "/" + MAZE_PATH.size(), 10, y);
+        g.drawString("Step: " + step + "/" + getActiveMazePathSize(), 10, y);
         y += 15;
         g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
         y += 15;
@@ -1697,7 +1793,15 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     int getMazeStepCount() {
-        return MAZE_PATH.size();
+        return getActiveMazePathSize();
+    }
+
+    String getInstructionLabel(MazeRoute route, int index) {
+        List<MazeInstruction> path = getMazePath(route);
+        if (index < 0 || index >= path.size()) {
+            throw new IndexOutOfBoundsException("Instruction index out of range: " + index);
+        }
+        return path.get(index).label;
     }
 
     void incrementStep() {
@@ -1705,6 +1809,35 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     static class Config {
+        enum RewardTarget {
+            ROGUE_EQUIPMENT("Rogue equipment", "Rogue equipment", "rogue equipment"),
+            ROGUE_KIT("Rogue kit", "Rogue kit", "rogue kit"),
+            KEEP_TOKENS("Keep tokens", null, null);
+
+            private final String displayText;
+            private final String dialogueOptionText;
+            private final String dialogueContainsText;
+
+            RewardTarget(String displayText, String dialogueOptionText, String dialogueContainsText) {
+                this.displayText = displayText;
+                this.dialogueOptionText = dialogueOptionText;
+                this.dialogueContainsText = dialogueContainsText;
+            }
+
+            String getDialogueOptionText() {
+                return dialogueOptionText;
+            }
+
+            String getDialogueContainsText() {
+                return dialogueContainsText;
+            }
+
+            @Override
+            public String toString() {
+                return displayText;
+            }
+        }
+
         /**
          * Whether to drink stamina potions to restore run energy.
          * True enables potion usage, false avoids it.
@@ -1731,6 +1864,16 @@ public class RoguesDenScript extends AbstractScript {
          * Randomly pan the camera to mimic human behavior.
          */
         boolean cameraPanning = true;
+
+        /**
+         * Determines which reward to claim from the Rogue NPC when spending tokens.
+         */
+        RewardTarget rewardTarget = RewardTarget.ROGUE_EQUIPMENT;
+
+        /**
+         * Stop the script once a complete rogue equipment set has been obtained.
+         */
+        boolean stopAfterFullSet = true;
 
         /**
          * Minimum idle delay between actions in milliseconds.
@@ -1780,28 +1923,69 @@ public class RoguesDenScript extends AbstractScript {
          */
         int breakLengthMax = 5;    // minutes
 
-        /**
-         * Name of the food item to withdraw from the bank.
-         * Leave blank to disable food usage.
-         */
-        String foodName = "Monkfish";
+/**
+ * Name of the food item to withdraw from the bank.
+ * Leave blank to disable food usage.
+ */
+String foodName = "Monkfish";
 
-        /**
-         * Number of food items to withdraw before each run.
-         * Must be positive when {@link #foodName} is not blank.
-         */
-        int foodQuantity = 12;
+/**
+ * Number of food items to withdraw before each run.
+ * Must be positive when {@link #foodName} is not blank.
+ */
+int foodQuantity = 12;
 
-        /**
-         * Health percentage at or below which food should be eaten.
-         * Must be between 0 and 100 and greater than or equal to {@link #hpFleeThreshold}.
-         */
-        int hpEatThreshold = 50;
+/**
+ * Health percentage at or below which food should be eaten.
+ * Must be between 0 and 100 and greater than or equal to {@link #hpFleeThreshold}.
+ */
+int hpEatThreshold = 50;
 
-        /**
-         * Critical health percentage that triggers an emergency retreat when no food remains.
-         * Must be between 0 and 100 and less than or equal to {@link #hpEatThreshold}.
-         */
-        int hpFleeThreshold = 25;
+/**
+ * Critical health percentage that triggers an emergency retreat when no food remains.
+ * Must be between 0 and 100 and less than or equal to {@link #hpEatThreshold}.
+ */
+int hpFleeThreshold = 25;
+
+/**
+ * Routing shortcut strategy in the maze.
+ */
+enum ShortcutMode {
+    AUTO("Auto"),
+    ALWAYS("Always use"),
+    NEVER("Never use");
+
+    private final String displayName;
+
+    ShortcutMode(String displayName) {
+        this.displayName = displayName;
+    }
+
+    @Override
+    public String toString() {
+        return displayName;
+    }
+}
+
+ShortcutMode shortcutMode = ShortcutMode.AUTO;
+
+/**
+ * Decide whether to use the shortcut based on the configured strategy.
+ *
+ * @param thievingLevel current Thieving level
+ * @return true if the shortcut should be used for this run
+ */
+boolean shouldUseShortcut(int thievingLevel) {
+    switch (shortcutMode) {
+        case ALWAYS:
+            return true;
+        case NEVER:
+            return false;
+        case AUTO:
+        default:
+            return thievingLevel >= 80;
+    }
+}
+
     }
 }
