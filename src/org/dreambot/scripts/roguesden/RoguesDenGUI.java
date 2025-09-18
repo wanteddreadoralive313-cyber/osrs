@@ -12,7 +12,7 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-setSize(300, 360);
+setSize(320, 400); // accommodate added stamina/route/HP-Food controls
 
 
         setLayout(new GridLayout(0, 1));
@@ -41,6 +41,15 @@ setSize(300, 360);
         JCheckBox hover = new JCheckBox("Hover entities", config.hoverEntities);
         JCheckBox rightClick = new JCheckBox("Random right-clicks", config.randomRightClick);
         JCheckBox camera = new JCheckBox("Camera panning", config.cameraPanning);
+
+        JPanel rewardPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        rewardPanel.add(new JLabel("Reward:"));
+        JComboBox<RoguesDenScript.Config.RewardTarget> rewardChoice =
+                new JComboBox<>(RoguesDenScript.Config.RewardTarget.values());
+        rewardChoice.setSelectedItem(config.rewardTarget);
+        rewardPanel.add(rewardChoice);
+
+        JCheckBox stopAfterSet = new JCheckBox("Stop after rogue set", config.stopAfterFullSet);
 
         // Idle timing (from enhance branch)
         JPanel idlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -94,7 +103,9 @@ setSize(300, 360);
             config.hoverEntities = hover.isSelected();
             config.randomRightClick = rightClick.isSelected();
             config.cameraPanning = camera.isSelected();
-            config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
+config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
+config.stopAfterFullSet = stopAfterSet.isSelected();
+config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
@@ -178,6 +189,8 @@ setSize(300, 360);
         add(hover);
         add(rightClick);
         add(camera);
+        add(rewardPanel);
+        add(stopAfterSet);
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);

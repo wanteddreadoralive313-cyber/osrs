@@ -1098,11 +1098,15 @@ public class RoguesDenScript extends AbstractScript {
         failureCount = 0;
     }
 
-    private boolean handleRewards() {
+    boolean handleRewards() {
         return handleRewards(false);
     }
 
     private boolean handleRewards(boolean retriedAfterDelay) {
+        if (config.rewardTarget == Config.RewardTarget.KEEP_TOKENS) {
+            return false;
+        }
+
         if (Inventory.count(TOKEN_NAME) < 1) {
             return false;
         }
@@ -1112,7 +1116,9 @@ public class RoguesDenScript extends AbstractScript {
             if (npc != null && npc.interact("Claim")) {
                 boolean success = handleRewardDialogue();
                 if (success) {
-                    if (hasFullRogueSet()) {
+                    if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
+                        && config.stopAfterFullSet
+                        && hasFullRogueSet()) {
                         log("Full rogue set obtained. Stopping script.");
                         ScriptManager.getScriptManager().stop();
                     }
@@ -1141,7 +1147,7 @@ public class RoguesDenScript extends AbstractScript {
         return true;
     }
 
-    private boolean handleRewardDialogue() {
+    protected boolean handleRewardDialogue() {
         Sleep.sleepUntil(() -> getDialogues().inDialogue()
                 || getDialogues().areOptionsAvailable()
                 || getDialogues().canContinue()
@@ -1151,7 +1157,7 @@ public class RoguesDenScript extends AbstractScript {
 
         long timeout = System.currentTimeMillis() + 12000;
         while (System.currentTimeMillis() < timeout) {
-            if (Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()))) {
+            if (hasReceivedTargetReward()) {
                 return true;
             }
 
@@ -1170,8 +1176,17 @@ public class RoguesDenScript extends AbstractScript {
             }
 
             if (getDialogues().areOptionsAvailable()) {
-                if (getDialogues().chooseOption("Rogue equipment")
-                    || getDialogues().chooseFirstOptionContaining("rogue equipment")) {
+                String option = config.rewardTarget.getDialogueOptionText();
+                String containsText = config.rewardTarget.getDialogueContainsText();
+                boolean handled = false;
+                if (option != null && getDialogues().chooseOption(option)) {
+                    handled = true;
+                } else if (containsText != null
+                    && getDialogues().chooseFirstOptionContaining(containsText)) {
+                    handled = true;
+                }
+
+                if (handled) {
                     Sleep.sleep(300, 600);
                     continue;
                 }
@@ -1190,7 +1205,19 @@ public class RoguesDenScript extends AbstractScript {
             Sleep.sleep(150, 300);
         }
 
-        return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
+        return hasReceivedTargetReward();
+    }
+
+    boolean hasReceivedTargetReward() {
+        switch (config.rewardTarget) {
+            case ROGUE_EQUIPMENT:
+                return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
+            case ROGUE_KIT:
+                return Inventory.contains("Rogue kit");
+            case KEEP_TOKENS:
+            default:
+                return false;
+        }
     }
 
     private boolean disposeTokens() {
@@ -1250,7 +1277,7 @@ public class RoguesDenScript extends AbstractScript {
         return name != null && Arrays.asList(GEAR_ITEMS).contains(name);
     }
 
-    private boolean hasFullRogueSet() {
+    boolean hasFullRogueSet() {
         List<String> missing = new ArrayList<>();
         for (String item : GEAR_ITEMS) {
             if (getEquipment() != null && getEquipment().contains(item)) {
@@ -1696,6 +1723,35 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     static class Config {
+        enum RewardTarget {
+            ROGUE_EQUIPMENT("Rogue equipment", "Rogue equipment", "rogue equipment"),
+            ROGUE_KIT("Rogue kit", "Rogue kit", "rogue kit"),
+            KEEP_TOKENS("Keep tokens", null, null);
+
+            private final String displayText;
+            private final String dialogueOptionText;
+            private final String dialogueContainsText;
+
+            RewardTarget(String displayText, String dialogueOptionText, String dialogueContainsText) {
+                this.displayText = displayText;
+                this.dialogueOptionText = dialogueOptionText;
+                this.dialogueContainsText = dialogueContainsText;
+            }
+
+            String getDialogueOptionText() {
+                return dialogueOptionText;
+            }
+
+            String getDialogueContainsText() {
+                return dialogueContainsText;
+            }
+
+            @Override
+            public String toString() {
+                return displayText;
+            }
+        }
+
         /**
          * Whether to drink stamina potions to restore run energy.
          * True enables potion usage, false avoids it.
@@ -1734,6 +1790,16 @@ public class RoguesDenScript extends AbstractScript {
          * Randomly pan the camera to mimic human behavior.
          */
         boolean cameraPanning = true;
+
+        /**
+         * Determines which reward to claim from the Rogue NPC when spending tokens.
+         */
+        RewardTarget rewardTarget = RewardTarget.ROGUE_EQUIPMENT;
+
+        /**
+         * Stop the script once a complete rogue equipment set has been obtained.
+         */
+        boolean stopAfterFullSet = true;
 
         /**
          * Minimum idle delay between actions in milliseconds.
