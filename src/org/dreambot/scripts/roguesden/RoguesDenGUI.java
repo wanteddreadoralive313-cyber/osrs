@@ -12,7 +12,7 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-setSize(280, 360); // accommodate added controls; remove conflict markers
+setSize(320, 400); // accommodate added controls
 
         setLayout(new GridLayout(0, 1));
 
@@ -62,11 +62,32 @@ setSize(280, 360); // accommodate added controls; remove conflict markers
         runRestorePanel.add(new JLabel("Run restore:"));
         runRestorePanel.add(runRestoreField);
 
-        JPanel routePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        routePanel.add(new JLabel("Maze route:"));
-        JComboBox<RoguesDenScript.Config.ShortcutMode> shortcutMode = new JComboBox<>(RoguesDenScript.Config.ShortcutMode.values());
-        shortcutMode.setSelectedItem(config.shortcutMode);
-        routePanel.add(shortcutMode);
+// HP controls (from codex/extend-food-settings-and-integrate-hp-checks)
+JPanel hpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+hpPanel.add(new JLabel("Eat HP ≤"));
+JTextField hpEatField = new JTextField(String.valueOf(config.hpEatThreshold), 3);
+hpPanel.add(hpEatField);
+hpPanel.add(new JLabel("Flee HP ≤"));
+JTextField hpFleeField = new JTextField(String.valueOf(config.hpFleeThreshold), 3);
+hpPanel.add(hpFleeField);
+
+// Food controls (from codex/extend-food-settings-and-integrate-hp-checks)
+JPanel foodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+foodPanel.add(new JLabel("Food:"));
+JTextField foodNameField = new JTextField(config.foodName, 8);
+foodPanel.add(foodNameField);
+foodPanel.add(new JLabel("Qty:"));
+JTextField foodQuantityField = new JTextField(String.valueOf(config.foodQuantity), 3);
+foodPanel.add(foodQuantityField);
+
+// Maze route controls (from main)
+JPanel routePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+routePanel.add(new JLabel("Maze route:"));
+JComboBox<RoguesDenScript.Config.ShortcutMode> shortcutMode =
+        new JComboBox<>(RoguesDenScript.Config.ShortcutMode.values());
+shortcutMode.setSelectedItem(config.shortcutMode);
+routePanel.add(shortcutMode);
+
 
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -100,7 +121,9 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
+            int hpEat, hpFlee;
             int bIntMin, bIntMax, bLenMin, bLenMax;
+            int foodQuantity;
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -116,14 +139,17 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
             try {
                 threshold = Integer.parseInt(runThresholdField.getText().trim());
                 restore = Integer.parseInt(runRestoreField.getText().trim());
+                hpEat = Integer.parseInt(hpEatField.getText().trim());
+                hpFlee = Integer.parseInt(hpFleeField.getText().trim());
                 bIntMin = Integer.parseInt(breakIntervalMin.getText().trim());
                 bIntMax = Integer.parseInt(breakIntervalMax.getText().trim());
                 bLenMin = Integer.parseInt(breakLengthMin.getText().trim());
                 bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
+                foodQuantity = Integer.parseInt(foodQuantityField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break values must be integers.",
+                        "Run/break/HP/food values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -139,7 +165,11 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
                     bIntMin,
                     bIntMax,
                     bLenMin,
-                    bLenMax
+                    bLenMax,
+                    hpEat,
+                    hpFlee,
+                    foodQuantity,
+                    foodNameField.getText().trim()
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -160,6 +190,10 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
             config.breakIntervalMax = bIntMax;
             config.breakLengthMin = bLenMin;
             config.breakLengthMax = bLenMax;
+            config.hpEatThreshold = hpEat;
+            config.hpFleeThreshold = hpFlee;
+            config.foodQuantity = foodQuantity;
+            config.foodName = foodNameField.getText().trim();
 
             cancelled.set(false);
             done.set(true);
@@ -177,7 +211,30 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
         add(idlePanel);
         add(runThresholdPanel);
         add(runRestorePanel);
-        add(routePanel);
+// Persist stop-after-full-set
+config.stopAfterFullSet = stopAfterSet.isSelected();
+
+// Persist route selection (from main)
+config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
+
+// Persist HP/Food settings (from codex/extend-food-settings-and-integrate-hp-checks)
+try {
+    config.hpEatThreshold = Integer.parseInt(hpEatField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
+try {
+    config.hpFleeThreshold = Integer.parseInt(hpFleeField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
+String foodNameText = foodNameField.getText().trim();
+if (!foodNameText.isEmpty()) {
+    config.foodName = foodNameText;
+}
+
+try {
+    config.foodQuantity = Integer.parseInt(foodQuantityField.getText().trim());
+} catch (NumberFormatException ignored) { /* keep previous value */ }
+
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);
