@@ -89,6 +89,11 @@ public class RoguesDenScript extends AbstractScript {
         new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET)
     };
 
+    enum MazeRoute {
+        LONG,
+        SHORTCUT
+    }
+
     private enum InstructionType {
         HINT,
         MOVE,
@@ -416,10 +421,22 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
-    private static final List<MazeInstruction> MAZE_PATH = Collections.unmodifiableList(loadMazePath());
+    private static class MazePaths {
+        final List<MazeInstruction> longRoute;
+        final List<MazeInstruction> shortcutRoute;
 
-    private static List<MazeInstruction> loadMazePath() {
-        List<MazeInstruction> instructions = new ArrayList<>();
+        MazePaths(List<MazeInstruction> longRoute, List<MazeInstruction> shortcutRoute) {
+            this.longRoute = Collections.unmodifiableList(new ArrayList<>(longRoute));
+            this.shortcutRoute = Collections.unmodifiableList(new ArrayList<>(shortcutRoute));
+        }
+    }
+
+    private static final MazePaths MAZE_PATHS = loadMazePaths();
+
+    private static MazePaths loadMazePaths() {
+        List<MazeInstruction> longRoute = new ArrayList<>();
+        List<MazeInstruction> shortcutRoute = new ArrayList<>();
+        List<MazeInstruction> target = longRoute;
         try (InputStream stream = RoguesDenScript.class.getResourceAsStream("maze_path.csv")) {
             if (stream == null) {
                 throw new IllegalStateException("Unable to locate maze_path.csv resource");
@@ -431,7 +448,22 @@ public class RoguesDenScript extends AbstractScript {
                 while ((line = reader.readLine()) != null) {
                     lineNumber++;
                     line = line.trim();
-                    if (line.isEmpty() || line.startsWith("#")) {
+                    if (line.isEmpty()) {
+                        continue;
+                    }
+
+                    if (line.startsWith("#")) {
+                        String lower = line.toLowerCase(Locale.ROOT);
+                        if (lower.startsWith("# route:")) {
+                            String routeName = lower.substring("# route:".length()).trim();
+                            if ("long".equals(routeName)) {
+                                target = longRoute;
+                            } else if ("shortcut".equals(routeName)) {
+                                target = shortcutRoute;
+                            } else {
+                                throw new IllegalStateException("Unknown maze route '" + routeName + "' on line " + lineNumber);
+                            }
+                        }
                         continue;
                     }
 
@@ -448,18 +480,21 @@ public class RoguesDenScript extends AbstractScript {
                         data = null;
                     }
 
-                    instructions.add(new MazeInstruction(tile, label, type, data));
+                    target.add(new MazeInstruction(tile, label, type, data));
                 }
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load maze_path.csv", e);
         }
 
-        if (instructions.isEmpty()) {
-            throw new IllegalStateException("No maze instructions loaded from maze_path.csv");
+        if (longRoute.isEmpty()) {
+            throw new IllegalStateException("No long route instructions loaded from maze_path.csv");
+        }
+        if (shortcutRoute.isEmpty()) {
+            throw new IllegalStateException("No shortcut route instructions loaded from maze_path.csv");
         }
 
-        return instructions;
+        return new MazePaths(longRoute, shortcutRoute);
     }
 
     private static Tile parseTile(String raw, int lineNumber) {
@@ -494,6 +529,36 @@ public class RoguesDenScript extends AbstractScript {
         }
     }
 
+    private List<MazeInstruction> getMazePath(MazeRoute route) {
+        return route == MazeRoute.SHORTCUT ? MAZE_PATHS.shortcutRoute : MAZE_PATHS.longRoute;
+    }
+
+    private List<MazeInstruction> getActiveMazePath() {
+        return getMazePath(activeMazeRoute);
+    }
+
+    private int getActiveMazePathSize() {
+        return getActiveMazePath().size();
+    }
+
+    MazeRoute determineMazeRouteForLevel(int thievingLevel) {
+        boolean useShortcut = config != null && config.shouldUseShortcut(thievingLevel);
+        if (useShortcut && !MAZE_PATHS.shortcutRoute.isEmpty()) {
+            return MazeRoute.SHORTCUT;
+        }
+        return MazeRoute.LONG;
+    }
+
+    private void ensureActiveMazeRouteSelected() {
+        if (step == 0) {
+            activeMazeRoute = determineMazeRouteForLevel(getThievingLevel());
+        }
+    }
+
+    protected int getThievingLevel() {
+        return getSkills().getRealLevel(Skill.THIEVING);
+    }
+
     private final ABCUtil abc;
     private final AtomicBoolean guiDone = new AtomicBoolean(false);
     private final AtomicBoolean guiCancelled = new AtomicBoolean(false);
@@ -510,6 +575,7 @@ public class RoguesDenScript extends AbstractScript {
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
     private long startTime;
+    private MazeRoute activeMazeRoute = MazeRoute.LONG;
 
     private enum State { TRAVEL, MAZE, REST }
 
@@ -586,7 +652,7 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean meetsRequirements() {
-        return getSkills().getRealLevel(Skill.THIEVING) >= 50
+        return getThievingLevel() >= 50
             && getSkills().getRealLevel(Skill.AGILITY) >= 50;
     }
 
@@ -922,12 +988,15 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        if (step >= MAZE_PATH.size()) {
+        ensureActiveMazeRouteSelected();
+        List<MazeInstruction> path = getActiveMazePath();
+
+        if (step >= path.size()) {
             handleChest();
             return;
         }
 
-        MazeInstruction current = MAZE_PATH.get(step);
+        MazeInstruction current = path.get(step);
         switch (current.type) {
             case SKIP:
                 step++;
@@ -1406,7 +1475,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Runtime: " + formatTime(System.currentTimeMillis() - startTime), 10, y);
         y += 15;
-        g.drawString("Step: " + step + "/" + MAZE_PATH.size(), 10, y);
+        g.drawString("Step: " + step + "/" + getActiveMazePathSize(), 10, y);
         y += 15;
         g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
         y += 15;
@@ -1611,7 +1680,15 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     int getMazeStepCount() {
-        return MAZE_PATH.size();
+        return getActiveMazePathSize();
+    }
+
+    String getInstructionLabel(MazeRoute route, int index) {
+        List<MazeInstruction> path = getMazePath(route);
+        if (index < 0 || index >= path.size()) {
+            throw new IndexOutOfBoundsException("Instruction index out of range: " + index);
+        }
+        return path.get(index).label;
     }
 
     void incrementStep() {
@@ -1705,5 +1782,36 @@ public class RoguesDenScript extends AbstractScript {
          * Must be greater than or equal to {@link #breakLengthMin}.
          */
         int breakLengthMax = 5;    // minutes
+
+        enum ShortcutMode {
+            AUTO("Auto"),
+            ALWAYS("Always use"),
+            NEVER("Never use");
+
+            private final String displayName;
+
+            ShortcutMode(String displayName) {
+                this.displayName = displayName;
+            }
+
+            @Override
+            public String toString() {
+                return displayName;
+            }
+        }
+
+        ShortcutMode shortcutMode = ShortcutMode.AUTO;
+
+        boolean shouldUseShortcut(int thievingLevel) {
+            switch (shortcutMode) {
+                case ALWAYS:
+                    return true;
+                case NEVER:
+                    return false;
+                case AUTO:
+                default:
+                    return thievingLevel >= 80;
+            }
+        }
     }
 }
