@@ -54,7 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
 public class RoguesDenScript extends AbstractScript {
 
-    private static final String TOKEN_NAME = "Rogue's reward token";
+    private static final String REWARD_CRATE_NAME = "Rogue equipment crate";
     private static final String REWARD_NPC = "Rogue";
     private static final String FLASH_POWDER_NAME = "Flash powder";
     private static final String ROGUE_GUARD_NAME = "Rogue Guard";
@@ -1098,9 +1098,18 @@ public class RoguesDenScript extends AbstractScript {
 
     private void handleChest() {
         if (Inventory.isFull()) {
-            log("Inventory full, cannot loot reward chest.");
-            step = 0;
-            return;
+            if (Inventory.contains(REWARD_CRATE_NAME)) {
+                log("Inventory full due to leftover rogue equipment crate; clearing it before looting chest.");
+                if (!clearRewardCrates(false) || Inventory.isFull()) {
+                    log("Unable to clear rogue equipment crate before opening reward chest.");
+                    step = 0;
+                    return;
+                }
+            } else {
+                log("Inventory full, cannot loot reward chest.");
+                step = 0;
+                return;
+            }
         }
 
         GameObject chest = GameObjects.closest(o ->
@@ -1128,24 +1137,30 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        int before = Inventory.count(TOKEN_NAME);
+        int before = Inventory.count(REWARD_CRATE_NAME);
+        boolean hadCrateBefore = before > 0 || Inventory.contains(REWARD_CRATE_NAME);
         if (!chest.interact("Open")) {
             log("Failed to open reward chest.");
             step = 0;
             return;
         }
 
-        if (Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) > before, 5000)) {
-            step = 0;
+        boolean crateReceived = Sleep.sleepUntil(() ->
+                Inventory.count(REWARD_CRATE_NAME) > before
+                    || (!hadCrateBefore && Inventory.contains(REWARD_CRATE_NAME)),
+            5000
+        );
+
+        if (crateReceived) {
             Player player = getLocalPlayer();
             if (player != null) {
                 lastSafeTile = player.getTile();
             }
             failureCount = 0;
         } else {
-            log("No token received from chest.");
-            step = 0;
+            log("No rogue equipment crate received from chest.");
         }
+        step = 0;
     }
 
     private void obstacleFailed(String obstacleName, String reason) {
@@ -1179,15 +1194,22 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean handleRewards(boolean retriedAfterDelay) {
-        if (config.rewardTarget == Config.RewardTarget.KEEP_TOKENS) {
-            return false;
+        if (config.rewardTarget == Config.RewardTarget.KEEP_CRATES) {
+            if (Inventory.count(REWARD_CRATE_NAME) < 1) {
+                return false;
+            }
+            boolean stored = clearRewardCrates(true);
+            if (!stored) {
+                log("Unable to store rogue equipment crate; will retry later.");
+            }
+            return true;
         }
 
-        if (Inventory.count(TOKEN_NAME) < 1) {
+        if (Inventory.count(REWARD_CRATE_NAME) < 1) {
             return false;
         }
         int attempts = 0;
-        while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
+        while (Inventory.count(REWARD_CRATE_NAME) >= 1 && attempts < 3) {
             NPC npc = NPCs.closest(REWARD_NPC);
             if (npc != null && npc.interact("Claim")) {
                 boolean success = handleRewardDialogue();
@@ -1209,15 +1231,15 @@ public class RoguesDenScript extends AbstractScript {
             attempts++;
             Sleep.sleep(600, 1200);
         }
-        if (Inventory.count(TOKEN_NAME) >= 1) {
+        if (Inventory.count(REWARD_CRATE_NAME) >= 1) {
             log("Failed to obtain gear after multiple attempts.");
-            boolean tokensCleared = disposeTokens();
-            if (!tokensCleared && !retriedAfterDelay && Inventory.count(TOKEN_NAME) >= 1) {
+            boolean cratesCleared = clearRewardCrates(true);
+            if (!cratesCleared && !retriedAfterDelay && Inventory.count(REWARD_CRATE_NAME) >= 1) {
                 log("Retrying claim after short delay...");
                 Sleep.sleep(1200, 1800);
                 return handleRewards(true);
             }
-            if (tokensCleared) {
+            if (cratesCleared) {
                 Sleep.sleep(600, 900);
             }
         }
@@ -1334,34 +1356,34 @@ public class RoguesDenScript extends AbstractScript {
                 return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
             case ROGUE_KIT:
                 return Inventory.contains("Rogue kit");
-            case KEEP_TOKENS:
+            case KEEP_CRATES:
             default:
                 return false;
         }
     }
 
-    private boolean disposeTokens() {
-        int tokenCount = Inventory.count(TOKEN_NAME);
-        if (tokenCount < 1) {
+    private boolean clearRewardCrates(boolean resetProgress) {
+        int crateCount = Inventory.count(REWARD_CRATE_NAME);
+        if (crateCount < 1) {
             return true;
         }
 
-        log("Disposing of leftover rogue tokens: " + tokenCount);
+        log("Clearing leftover rogue equipment crates: " + crateCount);
 
-        boolean disposed = false;
+        boolean cleared = false;
         boolean openedBankHere = false;
 
         if (!getBank().isOpen()) {
-            if (ensureBankOpen("deposit leftover reward tokens")) {
+            if (ensureBankOpen("deposit leftover reward crates")) {
                 openedBankHere = true;
             }
         }
 
         if (getBank().isOpen()) {
-            getBank().depositAll(TOKEN_NAME);
-            disposed = Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 2000);
-            if (!disposed) {
-                log("Failed to deposit rogue tokens; attempting to drop them.");
+            getBank().depositAll(REWARD_CRATE_NAME);
+            cleared = Sleep.sleepUntil(() -> !Inventory.contains(REWARD_CRATE_NAME), 2000);
+            if (!cleared) {
+                log("Failed to deposit rogue equipment crates; attempting to drop them.");
             }
         }
 
@@ -1369,28 +1391,30 @@ public class RoguesDenScript extends AbstractScript {
             closeBank();
         }
 
-        if (!disposed) {
+        if (!cleared) {
             int attempts = 0;
-            while (Inventory.contains(TOKEN_NAME) && attempts < 5) {
-                Item token = Inventory.get(TOKEN_NAME);
-                if (token == null || !token.interact("Drop")) {
+            while (Inventory.contains(REWARD_CRATE_NAME) && attempts < 5) {
+                Item crate = Inventory.get(REWARD_CRATE_NAME);
+                if (crate == null || !crate.interact("Drop")) {
                     break;
                 }
                 Sleep.sleep(200, 400);
-                Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 1200);
+                Sleep.sleepUntil(() -> !Inventory.contains(REWARD_CRATE_NAME), 1200);
                 attempts++;
             }
-            disposed = !Inventory.contains(TOKEN_NAME);
+            cleared = !Inventory.contains(REWARD_CRATE_NAME);
         }
 
-        if (disposed) {
+        if (cleared && resetProgress) {
             step = 0;
             failureCount = 0;
-            return true;
         }
 
-        log("Unable to remove rogue tokens after reward failure.");
-        return false;
+        if (!cleared) {
+            log("Unable to remove rogue equipment crates.");
+        }
+
+        return cleared;
     }
 
     private boolean isRogueGear(String name) {
@@ -1831,7 +1855,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Step: " + step + "/" + getActiveMazePathSize(), 10, y);
         y += 15;
-        g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
+        g.drawString("Crates: " + Inventory.count(REWARD_CRATE_NAME), 10, y);
         y += 15;
         g.drawString("Run: " + getWalking().getRunEnergy(), 10, y);
     }
@@ -1910,7 +1934,7 @@ public class RoguesDenScript extends AbstractScript {
                     continue;
                 }
 
-                if (TOKEN_NAME.equalsIgnoreCase(name)) {
+                if (REWARD_CRATE_NAME.equalsIgnoreCase(name)) {
                     continue;
                 }
 
@@ -2076,7 +2100,7 @@ public class RoguesDenScript extends AbstractScript {
         enum RewardTarget {
             ROGUE_EQUIPMENT("Rogue equipment", "Rogue equipment", "rogue equipment"),
             ROGUE_KIT("Rogue kit", "Rogue kit", "rogue kit"),
-            KEEP_TOKENS("Keep tokens", null, null);
+            KEEP_CRATES("Keep crates", null, null);
 
             private final String displayText;
             private final String dialogueOptionText;
@@ -2142,7 +2166,7 @@ public class RoguesDenScript extends AbstractScript {
         boolean cameraPanning = true;
 
         /**
-         * Determines which reward to claim from the Rogue NPC when spending tokens.
+         * Determines which reward to claim from the Rogue NPC when redeeming crates.
          */
         RewardTarget rewardTarget = RewardTarget.ROGUE_EQUIPMENT;
 

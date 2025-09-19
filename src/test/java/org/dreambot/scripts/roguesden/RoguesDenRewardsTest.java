@@ -162,19 +162,20 @@ class RoguesDenRewardsTest {
     }
 
     @Test
-    void keepTokensSkipsNpcInteraction() {
+    void keepCratesSkipsNpcInteractionWithoutCrates() {
         RoguesDenScript.Config config = new RoguesDenScript.Config();
-        config.rewardTarget = RoguesDenScript.Config.RewardTarget.KEEP_TOKENS;
+        config.rewardTarget = RoguesDenScript.Config.RewardTarget.KEEP_CRATES;
 
         TestScript script = new TestScript(config, mock(Dialogues.class));
         script.setUseRealDialogue(false);
 
         try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class);
              MockedStatic<NPCs> npcs = mockStatic(NPCs.class)) {
+            inventory.when(() -> Inventory.count("Rogue equipment crate")).thenReturn(0);
+
             boolean handled = script.handleRewards();
 
             assertFalse(handled);
-            inventory.verifyNoInteractions();
             npcs.verifyNoInteractions();
         }
     }
@@ -195,7 +196,7 @@ class RoguesDenRewardsTest {
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class);
              MockedStatic<ScriptManager> scriptManagerStatic = mockStatic(ScriptManager.class)) {
 
-            inventory.when(() -> Inventory.count("Rogue's reward token")).thenReturn(1);
+            inventory.when(() -> Inventory.count("Rogue equipment crate")).thenReturn(1);
 
             NPC npc = mock(NPC.class);
             when(npc.interact("Claim")).thenReturn(true);
@@ -230,7 +231,7 @@ class RoguesDenRewardsTest {
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class);
              MockedStatic<ScriptManager> scriptManagerStatic = mockStatic(ScriptManager.class)) {
 
-            inventory.when(() -> Inventory.count("Rogue's reward token")).thenReturn(1);
+            inventory.when(() -> Inventory.count("Rogue equipment crate")).thenReturn(1);
 
             NPC npc = mock(NPC.class);
             when(npc.interact("Claim")).thenReturn(true);
@@ -270,13 +271,13 @@ class RoguesDenRewardsTest {
              MockedStatic<NPCs> npcs = mockStatic(NPCs.class);
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
 
-            AtomicInteger tokenCount = new AtomicInteger(1);
+            AtomicInteger crateCount = new AtomicInteger(1);
             AtomicInteger gloveCount = new AtomicInteger(2);
 
             inventory.when(() -> Inventory.count(anyString())).thenAnswer(invocation -> {
                 String name = invocation.getArgument(0);
-                if ("Rogue's reward token".equals(name)) {
-                    return tokenCount.get();
+                if ("Rogue equipment crate".equals(name)) {
+                    return crateCount.get();
                 }
                 if ("Rogue gloves".equals(name)) {
                     return gloveCount.get();
@@ -286,7 +287,7 @@ class RoguesDenRewardsTest {
 
             NPC npc = mock(NPC.class);
             when(npc.interact("Claim")).then(invocation -> {
-                tokenCount.set(0);
+                crateCount.set(0);
                 return true;
             });
             npcs.when(() -> NPCs.closest("Rogue")).thenReturn(npc);
