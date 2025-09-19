@@ -37,9 +37,12 @@ import java.lang.reflect.ReflectiveOperationException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -1126,6 +1129,7 @@ public class RoguesDenScript extends AbstractScript {
                         log("Full rogue set obtained. Stopping script.");
                         ScriptManager.getScriptManager().stop();
                     }
+                    depositDuplicateRogueGear();
                     return true;
                 } else {
                     log("No gear received, retrying...");
@@ -1149,6 +1153,49 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
         return true;
+    }
+
+    private void depositDuplicateRogueGear() {
+        Map<String, Integer> depositPlan = new HashMap<>();
+        for (String item : GEAR_ITEMS) {
+            int keep = isGearEquipped(item) ? 0 : 1;
+            int count = Inventory.count(item);
+            if (count > keep) {
+                depositPlan.put(item, count - keep);
+            }
+        }
+
+        if (depositPlan.isEmpty()) {
+            return;
+        }
+
+        boolean openedHere = false;
+        if (!getBank().isOpen()) {
+            if (!ensureBankOpen("deposit duplicate rogue gear")) {
+                return;
+            }
+            openedHere = true;
+        }
+
+        for (Map.Entry<String, Integer> entry : depositPlan.entrySet()) {
+            String item = entry.getKey();
+            int amount = entry.getValue();
+            if (amount <= 0) {
+                continue;
+            }
+
+            if (!getBank().deposit(item, amount)) {
+                log("Failed to deposit duplicate " + item + ".");
+                continue;
+            }
+
+            int keep = isGearEquipped(item) ? 0 : 1;
+            Sleep.sleepUntil(() -> Inventory.count(item) <= keep, 2000);
+        }
+
+        if (openedHere) {
+            closeBank();
+        }
     }
 
     protected boolean handleRewardDialogue() {
