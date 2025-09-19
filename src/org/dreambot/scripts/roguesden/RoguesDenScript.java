@@ -33,13 +33,21 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.lang.reflect.ReflectiveOperationException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -576,6 +584,8 @@ public class RoguesDenScript extends AbstractScript {
     private volatile boolean postGuiInitializationComplete;
     private int failureCount = 0;
     private Tile lastSafeTile = START_TILE;
+    private Tile cachedBankTile;
+    private Tile bankTravelTarget;
     private long startTime;
     private MazeRoute activeMazeRoute = MazeRoute.LONG;
 
@@ -1188,6 +1198,7 @@ public class RoguesDenScript extends AbstractScript {
                         log("Full rogue set obtained. Stopping script.");
                         ScriptManager.getScriptManager().stop();
                     }
+                    depositDuplicateRogueGear();
                     return true;
                 } else {
                     log("No gear received, retrying...");
@@ -1211,6 +1222,49 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
         return true;
+    }
+
+    private void depositDuplicateRogueGear() {
+        Map<String, Integer> depositPlan = new HashMap<>();
+        for (String item : GEAR_ITEMS) {
+            int keep = isGearEquipped(item) ? 0 : 1;
+            int count = Inventory.count(item);
+            if (count > keep) {
+                depositPlan.put(item, count - keep);
+            }
+        }
+
+        if (depositPlan.isEmpty()) {
+            return;
+        }
+
+        boolean openedHere = false;
+        if (!getBank().isOpen()) {
+            if (!ensureBankOpen("deposit duplicate rogue gear")) {
+                return;
+            }
+            openedHere = true;
+        }
+
+        for (Map.Entry<String, Integer> entry : depositPlan.entrySet()) {
+            String item = entry.getKey();
+            int amount = entry.getValue();
+            if (amount <= 0) {
+                continue;
+            }
+
+            if (!getBank().deposit(item, amount)) {
+                log("Failed to deposit duplicate " + item + ".");
+                continue;
+            }
+
+            int keep = isGearEquipped(item) ? 0 : 1;
+            Sleep.sleepUntil(() -> Inventory.count(item) <= keep, 2000);
+        }
+
+        if (openedHere) {
+            closeBank();
+        }
     }
 
     protected boolean handleRewardDialogue() {
@@ -1494,41 +1548,81 @@ public class RoguesDenScript extends AbstractScript {
 
     private boolean ensureBankOpen(String context) {
         if (getBank().isOpen()) {
+            bankTravelTarget = null;
             return true;
         }
 
-        if (!isBankInRange()) {
-            String distance = getLocalPlayer() != null
-                ? String.format("%.2f", getLocalPlayer().distance(START_TILE))
-                : "unknown";
+        Tile bankTile = getNearestBankTile();
+        if (bankTile == null) {
             return handleBankAccessIssue(
-                String.format(
-                    "Closest bank is out of range (distance %s) while attempting to %s.",
-                    distance,
-                    context
-                )
+                "Unable to locate any reachable bank while attempting to " + context + ".",
+                true
             );
         }
 
-        if (!getBank().openClosest()) {
-            return handleBankAccessIssue("Failed to open the closest bank while attempting to " + context + ".");
-        }
-
-        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
-            return handleBankAccessIssue("Timed out waiting for bank to open while attempting to " + context + ".");
-        }
-
-        return true;
-    }
-
-    private boolean handleBankAccessIssue(String message) {
-        log(message);
-        if (attemptTeleportToSafety()) {
-            log("Teleport initiated to recover bank access; will retry once relocated.");
+        Player player = getLocalPlayer();
+        if (player == null) {
             return false;
         }
 
-        log("Teleport unavailable or failed; stopping script to avoid running without bank access.");
+        double distance = player.distance(bankTile);
+        if (!Double.isFinite(distance)) {
+            return false;
+        }
+
+        if (distance > BANK_INTERACTION_RANGE) {
+            if (player.isMoving() && Objects.equals(bankTravelTarget, bankTile)) {
+                return false;
+            }
+
+            if (!initiateBankTravel(bankTile)) {
+                return handleBankAccessIssue(
+                    "Failed to generate a path to the nearest bank while attempting to " + context + ".",
+                    true
+                );
+            }
+
+            return false;
+        }
+
+        bankTravelTarget = null;
+
+        if (player.isMoving()) {
+            return false;
+        }
+
+        if (!getBank().openClosest()) {
+            return handleBankAccessIssue(
+                "Failed to open the closest bank while attempting to " + context + ".",
+                false
+            );
+        }
+
+        if (!Sleep.sleepUntil(() -> getBank().isOpen(), 5000)) {
+            return handleBankAccessIssue(
+                "Timed out waiting for bank to open while attempting to " + context + ".",
+                false
+            );
+        }
+
+        cachedBankTile = bankTile;
+        return true;
+    }
+
+    private boolean handleBankAccessIssue(String message, boolean attemptRecovery) {
+        log(message);
+        if (attemptRecovery && attemptTeleportToSafety()) {
+            log("Teleport initiated to recover bank access; will retry once relocated.");
+            cachedBankTile = null;
+            bankTravelTarget = null;
+            return false;
+        }
+
+        if (attemptRecovery) {
+            log("Teleport unavailable or failed; stopping script to avoid running without bank access.");
+        } else {
+            log("Stopping script to avoid running without bank access.");
+        }
         ScriptManager.getScriptManager().stop();
         return false;
     }
@@ -1560,7 +1654,155 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean isBankInRange() {
-        return getLocalPlayer() != null && getLocalPlayer().distance(START_TILE) <= BANK_INTERACTION_RANGE;
+        Player player = getLocalPlayer();
+        Tile bankTile = getNearestBankTile();
+        if (player == null || bankTile == null) {
+            return false;
+        }
+        double distance = player.distance(bankTile);
+        return Double.isFinite(distance) && distance <= BANK_INTERACTION_RANGE;
+    }
+
+    private Tile getNearestBankTile() {
+        Tile resolved = resolveNearestReachableBankTile();
+        if (resolved != null) {
+            cachedBankTile = resolved;
+        }
+        return cachedBankTile;
+    }
+
+    Tile resolveNearestReachableBankTile() {
+        Tile viaApi = resolveNearestBankViaApi();
+        if (viaApi != null) {
+            return viaApi;
+        }
+
+        GameObject bankObject = GameObjects.closest(obj -> obj != null && obj.hasAction("Bank"));
+        return bankObject != null ? bankObject.getTile() : null;
+    }
+
+    private Tile resolveNearestBankViaApi() {
+        Object bank = getBank();
+        if (bank == null) {
+            return null;
+        }
+
+        try {
+            Object location = bank.getClass().getMethod("getClosestBankLocation").invoke(bank);
+            Tile tile = resolveBankTileFromLocation(location);
+            if (tile != null) {
+                return tile;
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+        }
+
+        try {
+            Object closest = bank.getClass().getMethod("getClosestBank").invoke(bank);
+            if (closest instanceof GameObject) {
+                return ((GameObject) closest).getTile();
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+        }
+
+        return null;
+    }
+
+    private Tile resolveBankTileFromLocation(Object location) {
+        if (location == null) {
+            return null;
+        }
+
+        String[] accessors = {"getCenter", "getTile", "getPosition"};
+        for (String accessor : accessors) {
+            try {
+                Object result = location.getClass().getMethod(accessor).invoke(location);
+                if (result instanceof Tile) {
+                    return (Tile) result;
+                }
+            } catch (ReflectiveOperationException | SecurityException ignored) {
+            }
+        }
+
+        try {
+            Object area = location.getClass().getMethod("getArea").invoke(location);
+            if (area instanceof Area) {
+                return ((Area) area).getCenter();
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+        }
+
+        return null;
+    }
+
+    private boolean initiateBankTravel(Tile bankTile) {
+        if (bankTile == null) {
+            return false;
+        }
+
+        if (getWalking() == null) {
+            return false;
+        }
+
+        Player player = getLocalPlayer();
+        if (player != null && player.isMoving() && Objects.equals(bankTravelTarget, bankTile)) {
+            return true;
+        }
+
+        bankTravelTarget = bankTile;
+
+        if (getWalking().walk(bankTile)) {
+            waitForBankMovement(bankTile);
+            return true;
+        }
+
+        if (attemptWebWalk(bankTile)) {
+            return true;
+        }
+
+        bankTravelTarget = null;
+        return false;
+    }
+
+    private boolean attemptWebWalk(Tile bankTile) {
+        Object walking = getWalking();
+        if (walking == null) {
+            return false;
+        }
+
+        try {
+            Object result = walking.getClass().getMethod("walk", Tile.class, boolean.class).invoke(walking, bankTile, true);
+            if (!(result instanceof Boolean) || (Boolean) result) {
+                waitForBankMovement(bankTile);
+                return true;
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+        }
+
+        try {
+            Object result = walking.getClass().getMethod("webWalk", Tile.class).invoke(walking, bankTile);
+            if (!(result instanceof Boolean) || (Boolean) result) {
+                waitForBankMovement(bankTile);
+                return true;
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+        }
+
+        return false;
+    }
+
+    private void waitForBankMovement(Tile bankTile) {
+        if (bankTile == null) {
+            return;
+        }
+
+        Sleep.sleepUntil(() -> {
+            Player player = getLocalPlayer();
+            if (player == null) {
+                return true;
+            }
+            double distance = player.distance(bankTile);
+            return player.isMoving() || (Double.isFinite(distance) && distance <= BANK_INTERACTION_RANGE);
+        }, 3000);
     }
 
     private void closeBank() {
