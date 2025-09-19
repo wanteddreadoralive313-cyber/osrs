@@ -12,8 +12,7 @@ public class RoguesDenGUI extends JFrame {
                         AtomicBoolean done,
                         AtomicBoolean cancelled) {
         setTitle("Rogues' Den Script");
-setSize(320, 400); // accommodate added stamina/route/HP-Food controls
-
+        setSize(340, 460); // accommodate added stamina/route/HP-Food controls
 
         setLayout(new GridLayout(0, 1));
 
@@ -77,6 +76,16 @@ setSize(320, 400); // accommodate added stamina/route/HP-Food controls
         shortcutMode.setSelectedItem(config.shortcutMode);
         routePanel.add(shortcutMode);
 
+        JPanel hpPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        hpPanel.add(new JLabel("Eat below HP%:"));
+        JTextField hpThresholdField = new JTextField(String.valueOf(config.minimumHealthPercent), 3);
+        hpPanel.add(hpThresholdField);
+
+        JPanel foodPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        foodPanel.add(new JLabel("Preferred food:"));
+        JTextField foodField = new JTextField(config.preferredFoodItem == null ? "" : config.preferredFoodItem, 12);
+        foodPanel.add(foodField);
+
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         breakIntervalPanel.add(new JLabel("Break interval (min):"));
@@ -103,14 +112,16 @@ setSize(320, 400); // accommodate added stamina/route/HP-Food controls
             config.hoverEntities = hover.isSelected();
             config.randomRightClick = rightClick.isSelected();
             config.cameraPanning = camera.isSelected();
-config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
-config.stopAfterFullSet = stopAfterSet.isSelected();
-config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
+            config.rewardTarget = (RoguesDenScript.Config.RewardTarget) rewardChoice.getSelectedItem();
+            config.stopAfterFullSet = stopAfterSet.isSelected();
+            config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSelectedItem();
 
             // Parse numeric inputs
             int newIdleMin, newIdleMax, threshold, restore;
             int bIntMin, bIntMax, bLenMin, bLenMax;
             int staminaTarget, staminaThreshold;
+            int hpThreshold;
+            String foodName = foodField.getText().trim();
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
                 newIdleMax = Integer.parseInt(idleMax.getText().trim());
@@ -132,11 +143,22 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
                 bLenMax = Integer.parseInt(breakLengthMax.getText().trim());
                 staminaTarget = Integer.parseInt(staminaTargetField.getText().trim());
                 staminaThreshold = Integer.parseInt(staminaThresholdField.getText().trim());
+                hpThreshold = Integer.parseInt(hpThresholdField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break/stamina values must be integers.",
+                        "Run/break/stamina/HP values must be integers.",
                         "Invalid input",
+                        JOptionPane.ERROR_MESSAGE
+                );
+                return;
+            }
+
+            if (hpThreshold > 0 && foodName.isEmpty()) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Please specify a preferred food when enabling HP eating.",
+                        "Invalid configuration",
                         JOptionPane.ERROR_MESSAGE
                 );
                 return;
@@ -153,7 +175,8 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
                     bLenMin,
                     bLenMax,
                     staminaTarget,
-                    staminaThreshold
+                    staminaThreshold,
+                    hpThreshold
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -176,6 +199,8 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
             config.breakLengthMax = bLenMax;
             config.staminaDoseTarget = staminaTarget;
             config.staminaDoseThreshold = staminaThreshold;
+            config.minimumHealthPercent = hpThreshold;
+            config.preferredFoodItem = foodName;
 
             cancelled.set(false);
             done.set(true);
@@ -195,6 +220,8 @@ config.shortcutMode = (RoguesDenScript.Config.ShortcutMode) shortcutMode.getSele
         add(runThresholdPanel);
         add(runRestorePanel);
         add(routePanel);
+        add(hpPanel);
+        add(foodPanel);
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);

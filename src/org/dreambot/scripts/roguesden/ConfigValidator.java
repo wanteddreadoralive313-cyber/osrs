@@ -16,7 +16,8 @@ public final class ConfigValidator {
                                   int runThreshold, int runRestore,
                                   int breakIntervalMin, int breakIntervalMax,
                                   int breakLengthMin, int breakLengthMax,
-                                  int staminaDoseTarget, int staminaDoseThreshold) {
+                                  int staminaDoseTarget, int staminaDoseThreshold,
+                                  int minimumHealthPercent) {
         if (runThreshold < 0 || runThreshold > 100 ||
             runRestore < 0 || runRestore > 100 ||
             runThreshold >= runRestore) {
@@ -31,6 +32,9 @@ public final class ConfigValidator {
         }
         if (staminaDoseTarget < 0 || staminaDoseThreshold < 0 || staminaDoseThreshold > staminaDoseTarget) {
             return "Stamina doses must be non-negative with min ≤ target.";
+        }
+        if (minimumHealthPercent < 0 || minimumHealthPercent > 100) {
+            return "Minimum HP percent must be between 0 and 100.";
         }
         return null;
     }
