@@ -3,15 +3,15 @@ package org.dreambot.scripts.roguesden;
 import org.dreambot.api.methods.container.impl.Inventory;
 import org.dreambot.api.methods.container.impl.bank.Bank;
 import org.dreambot.api.methods.container.impl.equipment.Equipment;
-import org.dreambot.api.methods.dialogues.Dialogues;
-import org.dreambot.api.methods.interactive.NPCs;
 import org.dreambot.api.script.ScriptManager;
 import org.dreambot.api.utilities.impl.ABCUtil;
 import org.dreambot.api.utilities.sleep.Sleep;
-import org.dreambot.api.wrappers.interactive.NPC;
+import org.dreambot.api.wrappers.items.Item;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
@@ -22,25 +22,11 @@ import static org.mockito.Mockito.*;
 class RoguesDenRewardsTest {
 
     private static class TestScript extends RoguesDenScript {
-        private final Dialogues dialogues;
         private boolean rewardReceived;
         private boolean fullSet;
-        private boolean useRealDialogue = true;
-        private boolean dialogueResult = true;
 
-        TestScript(RoguesDenScript.Config config, Dialogues dialogues) {
+        TestScript(RoguesDenScript.Config config) {
             super(mock(ABCUtil.class), config);
-            this.dialogues = dialogues;
-        }
-
-        @Override
-        public Dialogues getDialogues() {
-            return dialogues;
-        }
-
-        @Override
-        public void log(String message) {
-            // Suppress log output during tests.
         }
 
         void setRewardReceived(boolean rewardReceived) {
@@ -51,16 +37,8 @@ class RoguesDenRewardsTest {
             this.fullSet = fullSet;
         }
 
-        void setUseRealDialogue(boolean useRealDialogue) {
-            this.useRealDialogue = useRealDialogue;
-        }
-
-        void setDialogueResult(boolean dialogueResult) {
-            this.dialogueResult = dialogueResult;
-        }
-
         @Override
-        boolean hasReceivedTargetReward() {
+        boolean hasReceivedTargetReward(Map<String, Integer> previousCounts) {
             return rewardReceived;
         }
 
@@ -70,11 +48,8 @@ class RoguesDenRewardsTest {
         }
 
         @Override
-        protected boolean handleRewardDialogue() {
-            if (useRealDialogue) {
-                return super.handleRewardDialogue();
-            }
-            return dialogueResult;
+        public void log(String message) {
+            // Suppress log output during tests.
         }
     }
 
@@ -82,8 +57,8 @@ class RoguesDenRewardsTest {
         private final Bank bank;
         private final Equipment equipment;
 
-        DuplicateHandlingScript(RoguesDenScript.Config config, Dialogues dialogues, Bank bank, Equipment equipment) {
-            super(config, dialogues);
+        DuplicateHandlingScript(RoguesDenScript.Config config, Bank bank, Equipment equipment) {
+            super(config);
             this.bank = bank;
             this.equipment = equipment;
         }
@@ -100,82 +75,17 @@ class RoguesDenRewardsTest {
     }
 
     @Test
-    void equipmentRewardChoosesEquipmentDialogueOption() {
-        RoguesDenScript.Config config = new RoguesDenScript.Config();
-        config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_EQUIPMENT;
-
-        Dialogues dialogues = mock(Dialogues.class);
-        when(dialogues.inDialogue()).thenReturn(true, false);
-        when(dialogues.areOptionsAvailable()).thenReturn(true, false);
-        when(dialogues.canContinue()).thenReturn(false);
-        when(dialogues.isProcessing()).thenReturn(false);
-        when(dialogues.chooseOption("Rogue equipment")).thenReturn(true);
-
-        TestScript script = new TestScript(config, dialogues);
-        script.setRewardReceived(false);
-        script.setUseRealDialogue(true);
-
-        try (MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
-            sleep.when(() -> Sleep.sleepUntil(any(BooleanSupplier.class), anyInt()))
-                .thenAnswer(invocation -> {
-                    BooleanSupplier supplier = invocation.getArgument(0);
-                    return supplier.getAsBoolean();
-                });
-            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
-
-            boolean result = script.handleRewardDialogue();
-
-            assertFalse(result);
-            verify(dialogues, atLeastOnce()).chooseOption("Rogue equipment");
-        }
-    }
-
-    @Test
-    void kitRewardChoosesKitDialogueOption() {
-        RoguesDenScript.Config config = new RoguesDenScript.Config();
-        config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_KIT;
-
-        Dialogues dialogues = mock(Dialogues.class);
-        when(dialogues.inDialogue()).thenReturn(true, false);
-        when(dialogues.areOptionsAvailable()).thenReturn(true, false);
-        when(dialogues.canContinue()).thenReturn(false);
-        when(dialogues.isProcessing()).thenReturn(false);
-        when(dialogues.chooseOption("Rogue kit")).thenReturn(true);
-
-        TestScript script = new TestScript(config, dialogues);
-        script.setRewardReceived(false);
-        script.setUseRealDialogue(true);
-
-        try (MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
-            sleep.when(() -> Sleep.sleepUntil(any(BooleanSupplier.class), anyInt()))
-                .thenAnswer(invocation -> {
-                    BooleanSupplier supplier = invocation.getArgument(0);
-                    return supplier.getAsBoolean();
-                });
-            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
-
-            boolean result = script.handleRewardDialogue();
-
-            assertFalse(result);
-            verify(dialogues, atLeastOnce()).chooseOption("Rogue kit");
-        }
-    }
-
-    @Test
-    void keepTokensSkipsNpcInteraction() {
+    void keepCratesSkipsRewardHandling() {
         RoguesDenScript.Config config = new RoguesDenScript.Config();
         config.rewardTarget = RoguesDenScript.Config.RewardTarget.KEEP_TOKENS;
 
-        TestScript script = new TestScript(config, mock(Dialogues.class));
-        script.setUseRealDialogue(false);
+        TestScript script = new TestScript(config);
 
-        try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class);
-             MockedStatic<NPCs> npcs = mockStatic(NPCs.class)) {
+        try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class)) {
             boolean handled = script.handleRewards();
 
             assertFalse(handled);
             inventory.verifyNoInteractions();
-            npcs.verifyNoInteractions();
         }
     }
 
@@ -185,22 +95,37 @@ class RoguesDenRewardsTest {
         config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_EQUIPMENT;
         config.stopAfterFullSet = true;
 
-        TestScript script = new TestScript(config, mock(Dialogues.class));
-        script.setUseRealDialogue(false);
-        script.setDialogueResult(true);
+        TestScript script = new TestScript(config);
+        script.setRewardReceived(false);
         script.setFullSet(true);
 
+        Item crate = mock(Item.class);
+        when(crate.getName()).thenReturn("Rogue's equipment crate");
+        when(crate.hasAction("Search")).thenReturn(true);
+
+        AtomicInteger crateCount = new AtomicInteger(1);
+
+        when(crate.interact("Search")).thenAnswer(invocation -> {
+            script.setRewardReceived(true);
+            crateCount.decrementAndGet();
+            return true;
+        });
+
         try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class);
-             MockedStatic<NPCs> npcs = mockStatic(NPCs.class);
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class);
              MockedStatic<ScriptManager> scriptManagerStatic = mockStatic(ScriptManager.class)) {
 
-            inventory.when(() -> Inventory.count("Rogue's reward token")).thenReturn(1);
+            inventory.when(() -> Inventory.get(any())).thenAnswer(invocation -> crateCount.get() > 0 ? crate : null);
+            inventory.when(Inventory::all).thenAnswer(invocation -> crateCount.get() > 0
+                ? Collections.singletonList(crate)
+                : Collections.emptyList());
+            inventory.when(() -> Inventory.count(anyString())).thenReturn(0);
 
-            NPC npc = mock(NPC.class);
-            when(npc.interact("Claim")).thenReturn(true);
-            npcs.when(() -> NPCs.closest("Rogue")).thenReturn(npc);
-
+            sleep.when(() -> Sleep.sleepUntil(any(BooleanSupplier.class), anyInt()))
+                .thenAnswer(invocation -> {
+                    BooleanSupplier supplier = invocation.getArgument(0);
+                    return supplier.getAsBoolean();
+                });
             sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
 
             ScriptManager manager = mock(ScriptManager.class);
@@ -210,7 +135,7 @@ class RoguesDenRewardsTest {
 
             assertTrue(handled);
             verify(manager).stop();
-            verify(npc).interact("Claim");
+            verify(crate).interact("Search");
         }
     }
 
@@ -220,22 +145,37 @@ class RoguesDenRewardsTest {
         config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_EQUIPMENT;
         config.stopAfterFullSet = false;
 
-        TestScript script = new TestScript(config, mock(Dialogues.class));
-        script.setUseRealDialogue(false);
-        script.setDialogueResult(true);
+        TestScript script = new TestScript(config);
+        script.setRewardReceived(false);
         script.setFullSet(true);
 
+        Item crate = mock(Item.class);
+        when(crate.getName()).thenReturn("Rogue's equipment crate");
+        when(crate.hasAction("Search")).thenReturn(true);
+
+        AtomicInteger crateCount = new AtomicInteger(1);
+
+        when(crate.interact("Search")).thenAnswer(invocation -> {
+            script.setRewardReceived(true);
+            crateCount.decrementAndGet();
+            return true;
+        });
+
         try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class);
-             MockedStatic<NPCs> npcs = mockStatic(NPCs.class);
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class);
              MockedStatic<ScriptManager> scriptManagerStatic = mockStatic(ScriptManager.class)) {
 
-            inventory.when(() -> Inventory.count("Rogue's reward token")).thenReturn(1);
+            inventory.when(() -> Inventory.get(any())).thenAnswer(invocation -> crateCount.get() > 0 ? crate : null);
+            inventory.when(Inventory::all).thenAnswer(invocation -> crateCount.get() > 0
+                ? Collections.singletonList(crate)
+                : Collections.emptyList());
+            inventory.when(() -> Inventory.count(anyString())).thenReturn(0);
 
-            NPC npc = mock(NPC.class);
-            when(npc.interact("Claim")).thenReturn(true);
-            npcs.when(() -> NPCs.closest("Rogue")).thenReturn(npc);
-
+            sleep.when(() -> Sleep.sleepUntil(any(BooleanSupplier.class), anyInt()))
+                .thenAnswer(invocation -> {
+                    BooleanSupplier supplier = invocation.getArgument(0);
+                    return supplier.getAsBoolean();
+                });
             sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
 
             ScriptManager manager = mock(ScriptManager.class);
@@ -245,69 +185,72 @@ class RoguesDenRewardsTest {
 
             assertTrue(handled);
             verify(manager, never()).stop();
-            verify(npc).interact("Claim");
+            verify(crate).interact("Search");
         }
     }
 
     @Test
-    void duplicateGearDepositedAfterRewards() {
+    void duplicateGearDepositedAfterOpeningCrate() {
         RoguesDenScript.Config config = new RoguesDenScript.Config();
         config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_EQUIPMENT;
 
-        Dialogues dialogues = mock(Dialogues.class);
         Bank bank = mock(Bank.class);
         Equipment equipment = mock(Equipment.class);
-
         when(bank.isOpen()).thenReturn(true);
         when(equipment.contains(anyString())).thenReturn(false);
         when(equipment.contains("Rogue gloves")).thenReturn(true);
 
-        DuplicateHandlingScript script = new DuplicateHandlingScript(config, dialogues, bank, equipment);
-        script.setUseRealDialogue(false);
-        script.setDialogueResult(true);
+        DuplicateHandlingScript script = new DuplicateHandlingScript(config, bank, equipment);
+        script.setRewardReceived(false);
+
+        Item crate = mock(Item.class);
+        when(crate.getName()).thenReturn("Rogue's equipment crate");
+        when(crate.hasAction("Search")).thenReturn(true);
+
+        AtomicInteger crateCount = new AtomicInteger(1);
+        AtomicInteger gloveCount = new AtomicInteger(2);
+
+        when(crate.interact("Search")).thenAnswer(invocation -> {
+            script.setRewardReceived(true);
+            crateCount.decrementAndGet();
+            return true;
+        });
 
         try (MockedStatic<Inventory> inventory = mockStatic(Inventory.class);
-             MockedStatic<NPCs> npcs = mockStatic(NPCs.class);
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
 
-            AtomicInteger tokenCount = new AtomicInteger(1);
-            AtomicInteger gloveCount = new AtomicInteger(2);
-
+            inventory.when(() -> Inventory.get(any())).thenAnswer(invocation -> crateCount.get() > 0 ? crate : null);
+            inventory.when(Inventory::all).thenAnswer(invocation -> crateCount.get() > 0
+                ? Collections.singletonList(crate)
+                : Collections.emptyList());
             inventory.when(() -> Inventory.count(anyString())).thenAnswer(invocation -> {
                 String name = invocation.getArgument(0);
-                if ("Rogue's reward token".equals(name)) {
-                    return tokenCount.get();
-                }
                 if ("Rogue gloves".equals(name)) {
                     return gloveCount.get();
+                }
+                if ("Rogue kit".equals(name)) {
+                    return 0;
                 }
                 return 0;
             });
 
-            NPC npc = mock(NPC.class);
-            when(npc.interact("Claim")).then(invocation -> {
-                tokenCount.set(0);
-                return true;
-            });
-            npcs.when(() -> NPCs.closest("Rogue")).thenReturn(npc);
-
-            when(bank.deposit(eq("Rogue gloves"), eq(2))).thenAnswer(invocation -> {
-                gloveCount.addAndGet(-2);
+            when(bank.deposit(eq("Rogue gloves"), anyInt())).thenAnswer(invocation -> {
+                gloveCount.addAndGet(-invocation.getArgument(1));
                 return true;
             });
 
-            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
             sleep.when(() -> Sleep.sleepUntil(any(BooleanSupplier.class), anyInt()))
                 .thenAnswer(invocation -> {
                     BooleanSupplier supplier = invocation.getArgument(0);
                     return supplier.getAsBoolean();
                 });
+            sleep.when(() -> Sleep.sleep(anyInt(), anyInt())).thenReturn(0);
 
             boolean handled = script.handleRewards();
 
             assertTrue(handled);
             assertEquals(0, gloveCount.get(), "Duplicate gear should be deposited into the bank.");
-            verify(bank).deposit("Rogue gloves", 2);
+            verify(bank).deposit(eq("Rogue gloves"), anyInt());
         }
     }
 }

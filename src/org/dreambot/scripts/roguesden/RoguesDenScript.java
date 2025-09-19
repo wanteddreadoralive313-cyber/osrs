@@ -54,8 +54,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @ScriptManifest(category = Category.AGILITY, name = "RoguesDen", author = "Assistant", version = 1.0)
 public class RoguesDenScript extends AbstractScript {
 
-    private static final String TOKEN_NAME = "Rogue's reward token";
-    private static final String REWARD_NPC = "Rogue";
+    private static final String EQUIPMENT_CRATE_NAME = "Rogue's equipment crate";
+    private static final String ROGUE_KIT_NAME = "Rogue kit";
     private static final String FLASH_POWDER_NAME = "Flash powder";
     private static final String ROGUE_GUARD_NAME = "Rogue Guard";
     private static final String[] GEAR_ITEMS = {
@@ -1128,14 +1128,16 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        int before = Inventory.count(TOKEN_NAME);
+        int cratesBefore = getRewardCrateCount();
+        int kitsBefore = Inventory.count(ROGUE_KIT_NAME);
         if (!chest.interact("Open")) {
             log("Failed to open reward chest.");
             step = 0;
             return;
         }
 
-        if (Sleep.sleepUntil(() -> Inventory.count(TOKEN_NAME) > before, 5000)) {
+        if (Sleep.sleepUntil(() -> getRewardCrateCount() > cratesBefore
+            || Inventory.count(ROGUE_KIT_NAME) > kitsBefore, 5000)) {
             step = 0;
             Player player = getLocalPlayer();
             if (player != null) {
@@ -1143,7 +1145,7 @@ public class RoguesDenScript extends AbstractScript {
             }
             failureCount = 0;
         } else {
-            log("No token received from chest.");
+            log("No reward crate received from chest.");
             step = 0;
         }
     }
@@ -1175,53 +1177,133 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     boolean handleRewards() {
-        return handleRewards(false);
-    }
-
-    private boolean handleRewards(boolean retriedAfterDelay) {
         if (config.rewardTarget == Config.RewardTarget.KEEP_TOKENS) {
             return false;
         }
 
-        if (Inventory.count(TOKEN_NAME) < 1) {
+        boolean openedCrate = false;
+        int failedAttempts = 0;
+
+        while (failedAttempts < 3) {
+            Item crate = Inventory.get(this::isRewardCrate);
+            if (crate == null) {
+                break;
+            }
+
+            Map<String, Integer> snapshot = snapshotRewardProgress();
+            int cratesBefore = getRewardCrateCount();
+
+            if (!crate.hasAction("Search") || !crate.interact("Search")) {
+                log("Failed to search reward crate.");
+                failedAttempts++;
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            boolean rewardDetected = Sleep.sleepUntil(
+                () -> hasReceivedTargetReward(snapshot) || getRewardCrateCount() < cratesBefore,
+                5000
+            );
+
+            if (!rewardDetected && !hasReceivedTargetReward(snapshot)) {
+                log("Reward crate did not yield loot.");
+                failedAttempts++;
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            if (!hasReceivedTargetReward(snapshot)) {
+                log("Crate opened but no target reward detected yet.");
+                failedAttempts++;
+                Sleep.sleep(300, 600);
+                continue;
+            }
+
+            openedCrate = true;
+            failedAttempts = 0;
+
+            if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
+                && config.stopAfterFullSet
+                && hasFullRogueSet()) {
+                log("Full rogue set obtained. Stopping script.");
+                ScriptManager.getScriptManager().stop();
+                break;
+            }
+        }
+
+        if (openedCrate) {
+            depositDuplicateRogueGear();
+        }
+
+        return openedCrate;
+    }
+
+    private Map<String, Integer> snapshotRewardProgress() {
+        Map<String, Integer> counts = new HashMap<>();
+        if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT) {
+            for (String item : GEAR_ITEMS) {
+                counts.put(item, getOwnedCount(item));
+            }
+        } else if (config.rewardTarget == Config.RewardTarget.ROGUE_KIT) {
+            counts.put(ROGUE_KIT_NAME, Inventory.count(ROGUE_KIT_NAME));
+        }
+        return counts;
+    }
+
+    boolean hasReceivedTargetReward(Map<String, Integer> previousCounts) {
+        if (previousCounts == null || previousCounts.isEmpty()) {
+            previousCounts = Collections.emptyMap();
+        }
+
+        switch (config.rewardTarget) {
+            case ROGUE_EQUIPMENT:
+                for (String item : GEAR_ITEMS) {
+                    int before = previousCounts.getOrDefault(item, 0);
+                    if (getOwnedCount(item) > before) {
+                        return true;
+                    }
+                }
+                return false;
+            case ROGUE_KIT:
+                int beforeKits = previousCounts.getOrDefault(ROGUE_KIT_NAME, 0);
+                return Inventory.count(ROGUE_KIT_NAME) > beforeKits;
+            case KEEP_TOKENS:
+            default:
+                return false;
+        }
+    }
+
+    private int getOwnedCount(String item) {
+        int total = Inventory.count(item);
+        if (isGearEquipped(item)) {
+            total++;
+        }
+        return total;
+    }
+
+    private int getRewardCrateCount() {
+        int total = 0;
+        for (Item item : Inventory.all()) {
+            if (isRewardCrate(item)) {
+                total++;
+            }
+        }
+        return total;
+    }
+
+    private boolean isRewardCrate(Item item) {
+        return item != null && isRewardCrateName(item.getName()) && item.hasAction("Search");
+    }
+
+    private boolean isRewardCrateName(String name) {
+        if (name == null) {
             return false;
         }
-        int attempts = 0;
-        while (Inventory.count(TOKEN_NAME) >= 1 && attempts < 3) {
-            NPC npc = NPCs.closest(REWARD_NPC);
-            if (npc != null && npc.interact("Claim")) {
-                boolean success = handleRewardDialogue();
-                if (success) {
-                    if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
-                        && config.stopAfterFullSet
-                        && hasFullRogueSet()) {
-                        log("Full rogue set obtained. Stopping script.");
-                        ScriptManager.getScriptManager().stop();
-                    }
-                    depositDuplicateRogueGear();
-                    return true;
-                } else {
-                    log("No gear received, retrying...");
-                }
-            } else {
-                log("Failed to locate reward NPC.");
-            }
-            attempts++;
-            Sleep.sleep(600, 1200);
+        if (EQUIPMENT_CRATE_NAME.equalsIgnoreCase(name)) {
+            return true;
         }
-        if (Inventory.count(TOKEN_NAME) >= 1) {
-            log("Failed to obtain gear after multiple attempts.");
-            boolean tokensCleared = disposeTokens();
-            if (!tokensCleared && !retriedAfterDelay && Inventory.count(TOKEN_NAME) >= 1) {
-                log("Retrying claim after short delay...");
-                Sleep.sleep(1200, 1800);
-                return handleRewards(true);
-            }
-            if (tokensCleared) {
-                Sleep.sleep(600, 900);
-            }
-        }
-        return true;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.contains("rogue") && lower.contains("crate");
     }
 
     private void depositDuplicateRogueGear() {
@@ -1265,132 +1347,6 @@ public class RoguesDenScript extends AbstractScript {
         if (openedHere) {
             closeBank();
         }
-    }
-
-    protected boolean handleRewardDialogue() {
-        Sleep.sleepUntil(() -> getDialogues().inDialogue()
-                || getDialogues().areOptionsAvailable()
-                || getDialogues().canContinue()
-                || getDialogues().isProcessing(),
-            3000
-        );
-
-        long timeout = System.currentTimeMillis() + 12000;
-        while (System.currentTimeMillis() < timeout) {
-            if (hasReceivedTargetReward()) {
-                return true;
-            }
-
-            boolean dialogueActive = getDialogues().inDialogue()
-                || getDialogues().areOptionsAvailable()
-                || getDialogues().canContinue()
-                || getDialogues().isProcessing();
-
-            if (!dialogueActive) {
-                break;
-            }
-
-            if (getDialogues().isProcessing()) {
-                Sleep.sleep(100, 200);
-                continue;
-            }
-
-            if (getDialogues().areOptionsAvailable()) {
-                String option = config.rewardTarget.getDialogueOptionText();
-                String containsText = config.rewardTarget.getDialogueContainsText();
-                boolean handled = false;
-                if (option != null && getDialogues().chooseOption(option)) {
-                    handled = true;
-                } else if (containsText != null
-                    && getDialogues().chooseFirstOptionContaining(containsText)) {
-                    handled = true;
-                }
-
-                if (handled) {
-                    Sleep.sleep(300, 600);
-                    continue;
-                }
-
-                if (getDialogues().chooseFirstOptionContaining("Yes", "Yes please", "Yes, please", "Sure")) {
-                    Sleep.sleep(300, 600);
-                    continue;
-                }
-            }
-
-            if (getDialogues().canContinue() && getDialogues().clickContinue()) {
-                Sleep.sleep(300, 600);
-                continue;
-            }
-
-            Sleep.sleep(150, 300);
-        }
-
-        return hasReceivedTargetReward();
-    }
-
-    boolean hasReceivedTargetReward() {
-        switch (config.rewardTarget) {
-            case ROGUE_EQUIPMENT:
-                return Inventory.contains(i -> i != null && i.getName() != null && isRogueGear(i.getName()));
-            case ROGUE_KIT:
-                return Inventory.contains("Rogue kit");
-            case KEEP_TOKENS:
-            default:
-                return false;
-        }
-    }
-
-    private boolean disposeTokens() {
-        int tokenCount = Inventory.count(TOKEN_NAME);
-        if (tokenCount < 1) {
-            return true;
-        }
-
-        log("Disposing of leftover rogue tokens: " + tokenCount);
-
-        boolean disposed = false;
-        boolean openedBankHere = false;
-
-        if (!getBank().isOpen()) {
-            if (ensureBankOpen("deposit leftover reward tokens")) {
-                openedBankHere = true;
-            }
-        }
-
-        if (getBank().isOpen()) {
-            getBank().depositAll(TOKEN_NAME);
-            disposed = Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 2000);
-            if (!disposed) {
-                log("Failed to deposit rogue tokens; attempting to drop them.");
-            }
-        }
-
-        if (openedBankHere) {
-            closeBank();
-        }
-
-        if (!disposed) {
-            int attempts = 0;
-            while (Inventory.contains(TOKEN_NAME) && attempts < 5) {
-                Item token = Inventory.get(TOKEN_NAME);
-                if (token == null || !token.interact("Drop")) {
-                    break;
-                }
-                Sleep.sleep(200, 400);
-                Sleep.sleepUntil(() -> !Inventory.contains(TOKEN_NAME), 1200);
-                attempts++;
-            }
-            disposed = !Inventory.contains(TOKEN_NAME);
-        }
-
-        if (disposed) {
-            step = 0;
-            failureCount = 0;
-            return true;
-        }
-
-        log("Unable to remove rogue tokens after reward failure.");
-        return false;
     }
 
     private boolean isRogueGear(String name) {
@@ -1831,7 +1787,7 @@ public class RoguesDenScript extends AbstractScript {
         y += 15;
         g.drawString("Step: " + step + "/" + getActiveMazePathSize(), 10, y);
         y += 15;
-        g.drawString("Tokens: " + Inventory.count(TOKEN_NAME), 10, y);
+        g.drawString("Crates: " + getRewardCrateCount(), 10, y);
         y += 15;
         g.drawString("Run: " + getWalking().getRunEnergy(), 10, y);
     }
@@ -1910,7 +1866,7 @@ public class RoguesDenScript extends AbstractScript {
                     continue;
                 }
 
-                if (TOKEN_NAME.equalsIgnoreCase(name)) {
+                if (isRewardCrateName(name) || ROGUE_KIT_NAME.equalsIgnoreCase(name)) {
                     continue;
                 }
 
@@ -2076,7 +2032,7 @@ public class RoguesDenScript extends AbstractScript {
         enum RewardTarget {
             ROGUE_EQUIPMENT("Rogue equipment", "Rogue equipment", "rogue equipment"),
             ROGUE_KIT("Rogue kit", "Rogue kit", "rogue kit"),
-            KEEP_TOKENS("Keep tokens", null, null);
+            KEEP_TOKENS("Keep crates", null, null);
 
             private final String displayText;
             private final String dialogueOptionText;
@@ -2142,7 +2098,7 @@ public class RoguesDenScript extends AbstractScript {
         boolean cameraPanning = true;
 
         /**
-         * Determines which reward to claim from the Rogue NPC when spending tokens.
+         * Determines how to handle Rogue reward crates once obtained.
          */
         RewardTarget rewardTarget = RewardTarget.ROGUE_EQUIPMENT;
 
