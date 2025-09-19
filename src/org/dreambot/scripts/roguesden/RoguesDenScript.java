@@ -38,6 +38,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -579,6 +581,12 @@ public class RoguesDenScript extends AbstractScript {
 
     private enum State { TRAVEL, MAZE, REST }
 
+    enum HealthCheckResult {
+        NO_ACTION,
+        CONSUMED_FOOD,
+        NEEDS_RESTOCK
+    }
+
     public RoguesDenScript() {
         this(createABCUtil(), createConfig());
     }
@@ -667,7 +675,8 @@ public class RoguesDenScript extends AbstractScript {
             cfg.breakLengthMin,
             cfg.breakLengthMax,
             cfg.staminaDoseTarget,
-            cfg.staminaDoseThreshold
+            cfg.staminaDoseThreshold,
+            cfg.minimumHealthPercent
         );
         if (error != null) {
             log(error);
@@ -747,11 +756,68 @@ public class RoguesDenScript extends AbstractScript {
             case MAZE:
                 Player mazePlayer = getLocalPlayer();
                 if (mazePlayer != null && !mazePlayer.isAnimating() && !mazePlayer.isMoving()) {
+                    HealthCheckResult healthResult = handleHealthMaintenance();
+                    if (healthResult == HealthCheckResult.CONSUMED_FOOD) {
+                        return Calculations.random(300, 600);
+                    }
+                    if (healthResult == HealthCheckResult.NEEDS_RESTOCK) {
+                        return Calculations.random(300, 600);
+                    }
                     handleMaze(mazePlayer);
                 }
                 return Calculations.random(200, 400);
         }
         return Calculations.random(200, 400);
+    }
+
+    HealthCheckResult handleHealthMaintenance() {
+        if (!shouldMonitorHealth()) {
+            return HealthCheckResult.NO_ACTION;
+        }
+        final String foodName = getConfiguredFoodName();
+        return handleHealthMaintenance(
+            () -> {
+                if (getHealth() == null) {
+                    return 100;
+                }
+                return getHealth().getPercentage();
+            },
+            () -> Inventory.contains(foodName),
+            () -> Inventory.get(foodName)
+        );
+    }
+
+    HealthCheckResult handleHealthMaintenance(IntSupplier healthSupplier,
+                                             BooleanSupplier foodAvailableSupplier,
+                                             Supplier<Item> foodItemSupplier) {
+        if (!shouldMonitorHealth()) {
+            return HealthCheckResult.NO_ACTION;
+        }
+
+        int healthPercent = healthSupplier.getAsInt();
+        if (healthPercent >= config.minimumHealthPercent) {
+            return HealthCheckResult.NO_ACTION;
+        }
+
+        String foodName = getConfiguredFoodName();
+        if (foodName.isEmpty()) {
+            return HealthCheckResult.NO_ACTION;
+        }
+
+        if (!foodAvailableSupplier.getAsBoolean()) {
+            log("Out of " + foodName + "; marking supplies for restock.");
+            suppliesReady = false;
+            return HealthCheckResult.NEEDS_RESTOCK;
+        }
+
+        Item food = foodItemSupplier.get();
+        if (food == null || !food.interact("Eat")) {
+            log("Failed to eat " + foodName + "; marking supplies for restock.");
+            suppliesReady = false;
+            return HealthCheckResult.NEEDS_RESTOCK;
+        }
+
+        return HealthCheckResult.CONSUMED_FOOD;
     }
 
     private State getState(Player player) {
@@ -1372,6 +1438,25 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
+        String foodName = getConfiguredFoodName();
+        if (!foodName.isEmpty() && !Inventory.contains(foodName)) {
+            if (!bankOpened && !ensureBankOpen("withdraw " + foodName)) {
+                return false;
+            }
+            bankOpened = true;
+            if (!getBank().contains(foodName)) {
+                log("Missing preferred food item: " + foodName);
+                closeBank();
+                return false;
+            }
+            getBank().withdraw(foodName, 1);
+            if (!Sleep.sleepUntil(() -> Inventory.contains(foodName), 2000)) {
+                log("Failed to withdraw preferred food item " + foodName + ".");
+                closeBank();
+                return false;
+            }
+        }
+
         if (bankOpened) {
             if (Inventory.contains("Vial")) {
                 getBank().depositAll("Vial");
@@ -1524,7 +1609,30 @@ public class RoguesDenScript extends AbstractScript {
         if (config.useStamina && shouldRestockStamina(getStaminaDoseCount())) {
             return false;
         }
+        if (needsFoodRestock()) {
+            return false;
+        }
         return true;
+    }
+
+    private boolean needsFoodRestock() {
+        String foodName = getConfiguredFoodName();
+        return !foodName.isEmpty() && !Inventory.contains(foodName);
+    }
+
+    private boolean shouldMonitorHealth() {
+        return config != null && config.minimumHealthPercent > 0 && isFoodConfigured();
+    }
+
+    private boolean isFoodConfigured() {
+        return !getConfiguredFoodName().isEmpty();
+    }
+
+    private String getConfiguredFoodName() {
+        if (config == null || config.preferredFoodItem == null) {
+            return "";
+        }
+        return config.preferredFoodItem.trim();
     }
 
     private boolean hasFullRogueSetEquipped() {
@@ -1824,6 +1932,17 @@ public class RoguesDenScript extends AbstractScript {
          * Valid range: 0–100 and must be greater than {@link #runThreshold}.
          */
         int runRestore = 40;
+
+        /**
+         * Hitpoints percentage threshold that triggers eating configured food.
+         * Valid range: 0–100. A value of 0 disables automatic eating.
+         */
+        int minimumHealthPercent = 0;
+
+        /**
+         * Preferred food item name to withdraw and eat when {@link #minimumHealthPercent} is breached.
+         */
+        String preferredFoodItem = "";
 
         /**
          * Minimum minutes between extended breaks.
