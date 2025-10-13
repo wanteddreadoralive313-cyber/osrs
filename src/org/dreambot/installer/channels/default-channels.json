@@ -1,0 +1,35 @@
+{
+  "scriptFileName": "RoguesDen.jar",
+  "manifestSources": [
+    "https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/osrs/main/installer/channels.json",
+    "https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/osrs/master/installer/channels.json",
+    "https://cdn.jsdelivr.net/gh/YOUR_GITHUB_USERNAME/osrs@main/installer/channels.json",
+    "https://raw.fastgit.org/YOUR_GITHUB_USERNAME/osrs/main/installer/channels.json"
+  ],
+  "channels": [
+    {
+      "name": "GitHub Release",
+      "urls": [
+        "https://github.com/YOUR_GITHUB_USERNAME/osrs/releases/latest/download/RoguesDen.jar",
+        "https://github.com/YOUR_GITHUB_USERNAME/osrs/releases/latest/download/roguesden-1.0-SNAPSHOT.jar"
+      ],
+      "destinationFileName": "RoguesDen.jar"
+    },
+    {
+      "name": "GitHub Raw",
+      "urls": [
+        "https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/osrs/main/dist/RoguesDen.jar",
+        "https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/osrs/main/target/roguesden-1.0-SNAPSHOT.jar"
+      ],
+      "destinationFileName": "RoguesDen.jar"
+    },
+    {
+      "name": "jsDelivr Mirror",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/YOUR_GITHUB_USERNAME/osrs@main/dist/RoguesDen.jar",
+        "https://cdn.jsdelivr.net/gh/YOUR_GITHUB_USERNAME/osrs@main/target/roguesden-1.0-SNAPSHOT.jar"
+      ],
+      "destinationFileName": "RoguesDen.jar"
+    }
+  ]
+}
