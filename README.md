@@ -1,6 +1,51 @@
 # Rogue's Den DreamBot Script on Windows
 
-This guide walks Windows users through installing the tools you need, building the script, and running it inside DreamBot.
+This guide walks Windows users through installing the tools you need, building the script, packaging a one-click Windows installer, and running it inside DreamBot.
+
+## One-Click Windows Installer
+
+The project now includes a lightweight installer that automatically updates the Rogue's Den script every time it starts. The installer downloads the most recent script JAR from multiple mirrored channels, copies it into your DreamBot Scripts directory, and confirms success using a GUI dialog.
+
+### Build the Installer
+
+1. Open a terminal in the project root.
+2. Run Maven to build both the script JAR and the installer executable:
+   ```bat
+   mvn package
+   ```
+3. After the build succeeds, the installer is located at:
+   ```
+   target\RoguesDenInstaller.exe
+   ```
+   The fat JAR that backs the installer is available at `target\roguesden-installer.jar`.
+
+> **Note:** The installer requires a Java 11+ runtime on the target machine. Launch4j will prompt the user if the minimum version is not met.
+
+### First Run Experience
+
+1. Double-click `RoguesDenInstaller.exe`.
+2. The installer pulls the latest `channels.json` manifest from the configured sources (see below). If it cannot reach any remote manifest, it falls back to the bundled defaults.
+3. The installer attempts each download URL in order until it successfully downloads the script or exhausts every channel.
+4. Once a download succeeds, the executable copies the script to your DreamBot `Scripts` directory and displays a confirmation dialog.
+
+The installer re-runs this process every time it starts, guaranteeing that the local copy of the script stays synchronized with the most recent channel update.
+
+### Channel Configuration
+
+* At runtime the installer keeps its working files inside:
+  * Windows: `%LOCALAPPDATA%\RoguesDenInstaller`
+  * macOS/Linux: `~/.rogues-den/installer`
+* The file `channels.json` describes the available download mirrors. On first launch the installer copies a default version (based on `src/org/dreambot/installer/channels/default-channels.json`).
+* The manifest can list multiple mirrors for the script JAR and multiple sources for the manifest itself. Example entries are pre-populated with GitHub raw URLs and the jsDelivr CDN—replace `YOUR_GITHUB_USERNAME` with your GitHub handle (or add your own mirrors).
+* To ship updates to the channel list automatically, publish a fresh `channels.json` at any of the URLs listed under the `manifestSources` array. Each time the installer runs it checks every source, downloading an updated manifest whenever the remote content differs from the local copy.
+* Optional SHA-256 hashes can be added to each channel entry for integrity validation.
+
+You can override or extend the default manifest sources by either:
+
+* Passing `--channel-source=<URL>` when launching the installer executable, or
+* Setting the environment variable `ROGUES_DEN_CHANNEL_SOURCES` to a semicolon-separated list of manifest URLs.
+
+To override the DreamBot root directory (useful for portable installs), set `ROGUES_DEN_DREAMBOT_DIR` to your desired path before running the installer.
 
 ## Prerequisites
 
