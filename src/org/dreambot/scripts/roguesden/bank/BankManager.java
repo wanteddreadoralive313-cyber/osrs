@@ -267,6 +267,51 @@ public class BankManager {
         return cleared;
     }
 
+    public boolean bankRogueRewards() {
+        boolean openedHere = false;
+        if (!script.getBank().isOpen()) {
+            if (!ensureBankOpen("bank rogue rewards")) {
+                return false;
+            }
+            openedHere = true;
+        }
+
+        boolean deposited = true;
+
+        if (Inventory.contains(rewardCrateName)) {
+            script.getBank().depositAll(rewardCrateName);
+            boolean cleared = Sleep.sleepUntil(() -> !Inventory.contains(rewardCrateName), 2000);
+            if (!cleared) {
+                script.log("Failed to deposit rogue equipment crates while banking rewards.");
+                deposited = false;
+            }
+        }
+
+        for (String gear : gearItems) {
+            if (!Inventory.contains(gear)) {
+                continue;
+            }
+
+            if (!script.getBank().depositAll(gear)) {
+                script.log("Failed to deposit " + gear + " while banking rewards.");
+                deposited = false;
+                continue;
+            }
+
+            boolean cleared = Sleep.sleepUntil(() -> !Inventory.contains(gear), 2000);
+            if (!cleared) {
+                script.log("Unable to confirm " + gear + " deposited while banking rewards.");
+                deposited = false;
+            }
+        }
+
+        if (openedHere) {
+            closeBank();
+        }
+
+        return deposited;
+    }
+
     public void depositDuplicateRogueGear() {
         boolean openedHere = false;
         List<String> depositPlan = new ArrayList<>();

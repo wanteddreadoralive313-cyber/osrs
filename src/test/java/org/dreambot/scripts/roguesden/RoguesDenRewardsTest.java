@@ -23,6 +23,7 @@ class RoguesDenRewardsTest {
 
     private static class TestScript extends RoguesDenScript {
         private final Dialogues dialogues;
+        private Bank bank = mock(Bank.class);
         private boolean rewardReceived;
         private boolean fullSet;
         private boolean useRealDialogue = true;
@@ -31,11 +32,18 @@ class RoguesDenRewardsTest {
         TestScript(RoguesDenScript.Config config, Dialogues dialogues) {
             super(mock(ABCUtil.class), config);
             this.dialogues = dialogues;
+            when(bank.isOpen()).thenReturn(true);
+            when(bank.depositAll(anyString())).thenReturn(true);
         }
 
         @Override
         public Dialogues getDialogues() {
             return dialogues;
+        }
+
+        @Override
+        public Bank getBank() {
+            return bank;
         }
 
         @Override
@@ -57,6 +65,10 @@ class RoguesDenRewardsTest {
 
         void setDialogueResult(boolean dialogueResult) {
             this.dialogueResult = dialogueResult;
+        }
+
+        void setBank(Bank bank) {
+            this.bank = bank;
         }
 
         @Override
@@ -251,7 +263,7 @@ class RoguesDenRewardsTest {
     }
 
     @Test
-    void duplicateGearDepositedAfterRewards() {
+    void banksRogueRewardsAfterClaim() {
         RoguesDenScript.Config config = new RoguesDenScript.Config();
         config.rewardTarget = RoguesDenScript.Config.RewardTarget.ROGUE_EQUIPMENT;
 
@@ -272,7 +284,7 @@ class RoguesDenRewardsTest {
              MockedStatic<Sleep> sleep = mockStatic(Sleep.class)) {
 
             AtomicInteger crateCount = new AtomicInteger(1);
-            AtomicInteger gloveCount = new AtomicInteger(2);
+            AtomicInteger gloveCount = new AtomicInteger(1);
 
             inventory.when(() -> Inventory.count(anyString())).thenAnswer(invocation -> {
                 String name = invocation.getArgument(0);
@@ -285,6 +297,17 @@ class RoguesDenRewardsTest {
                 return 0;
             });
 
+            inventory.when(() -> Inventory.contains(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if ("Rogue equipment crate".equals(name)) {
+                    return crateCount.get() > 0;
+                }
+                if ("Rogue gloves".equals(name)) {
+                    return gloveCount.get() > 0;
+                }
+                return false;
+            });
+
             NPC npc = mock(NPC.class);
             when(npc.interact("Claim")).then(invocation -> {
                 crateCount.set(0);
@@ -292,8 +315,8 @@ class RoguesDenRewardsTest {
             });
             npcs.when(() -> NPCs.closest("Rogue")).thenReturn(npc);
 
-            when(bank.deposit(eq("Rogue gloves"), eq(2))).thenAnswer(invocation -> {
-                gloveCount.addAndGet(-2);
+            when(bank.depositAll(eq("Rogue gloves"))).thenAnswer(invocation -> {
+                gloveCount.set(0);
                 return true;
             });
 
@@ -302,13 +325,13 @@ class RoguesDenRewardsTest {
                 .thenAnswer(invocation -> {
                     BooleanSupplier supplier = invocation.getArgument(0);
                     return supplier.getAsBoolean();
-                });
+            });
 
             boolean handled = script.handleRewards();
 
             assertTrue(handled);
-            assertEquals(0, gloveCount.get(), "Duplicate gear should be deposited into the bank.");
-            verify(bank).deposit("Rogue gloves", 2);
+            assertEquals(0, gloveCount.get(), "Rogue gear should be deposited into the bank after claiming.");
+            verify(bank).depositAll("Rogue gloves");
         }
     }
 }
