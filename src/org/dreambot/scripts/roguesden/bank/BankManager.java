@@ -267,6 +267,53 @@ public class BankManager {
         return cleared;
     }
 
+    public boolean hasRewardsToBank() {
+        return Inventory.contains(rewardCrateName)
+            || Inventory.contains("Rogue kit")
+            || Inventory.contains(i -> i != null && Arrays.asList(gearItems).contains(i.getName()));
+    }
+
+    public boolean bankRewards() {
+        if (!hasRewardsToBank()) {
+            return true;
+        }
+
+        boolean openedHere = false;
+
+        if (!script.getBank().isOpen()) {
+            if (!ensureBankOpen("bank rewards")) {
+                return false;
+            }
+            openedHere = true;
+        }
+
+        boolean success = depositRewardItem(rewardCrateName);
+        success &= depositRewardItem("Rogue kit");
+
+        for (String gearItem : gearItems) {
+            success &= depositRewardItem(gearItem);
+        }
+
+        if (openedHere) {
+            closeBank();
+        }
+
+        return success;
+    }
+
+    private boolean depositRewardItem(String itemName) {
+        if (!Inventory.contains(itemName)) {
+            return true;
+        }
+
+        script.getBank().depositAll(itemName);
+        boolean deposited = Sleep.sleepUntil(() -> !Inventory.contains(itemName), 2000);
+        if (!deposited) {
+            script.log("Failed to deposit " + itemName + ".");
+        }
+        return deposited;
+    }
+
     public void depositDuplicateRogueGear() {
         boolean openedHere = false;
         List<String> depositPlan = new ArrayList<>();
