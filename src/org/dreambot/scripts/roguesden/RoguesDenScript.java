@@ -12,6 +12,8 @@ import org.dreambot.api.methods.map.Tile;
 import org.dreambot.api.methods.skills.Skill;
 import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.methods.tabs.Tabs;
+import org.dreambot.api.methods.worlds.World;
+import org.dreambot.api.methods.worlds.Worlds;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.script.Category;
 import org.dreambot.api.script.ScriptManager;
@@ -53,15 +55,19 @@ public class RoguesDenScript extends AbstractScript {
     private static final long MAX_TRAVEL_TIME_MS = 120_000L;
     private static final int MAX_TRAVEL_PATH_FAILURES = 6;
     private static final int MAX_TRAVEL_RECOVERIES = 3;
+    private static final long STUCK_MOVEMENT_TIMEOUT_MS = 20_000L;
+    private static final long WORLD_HOP_COOLDOWN_MS = 90_000L;
 
     private static class TeleportOption {
         private final String keyword;
         private final String dialogueOption;
+        private final String[] actions;
         private final EquipmentSlot[] slots;
 
-        TeleportOption(String keyword, String dialogueOption, EquipmentSlot... slots) {
+        TeleportOption(String keyword, String dialogueOption, String[] actions, EquipmentSlot... slots) {
             this.keyword = keyword;
             this.dialogueOption = dialogueOption;
+            this.actions = actions == null ? new String[0] : Arrays.copyOf(actions, actions.length);
             this.slots = slots == null ? new EquipmentSlot[0] : Arrays.copyOf(slots, slots.length);
         }
 
@@ -73,13 +79,20 @@ public class RoguesDenScript extends AbstractScript {
             return dialogueOption;
         }
 
+        String[] getActions() {
+            return actions;
+        }
+
         EquipmentSlot[] getSlots() {
             return slots;
         }
     }
 
     private static final TeleportOption[] TELEPORT_OPTIONS = {
-        new TeleportOption("Games necklace", "Burthorpe", EquipmentSlot.AMULET)
+        new TeleportOption("Games necklace", "Burthorpe", new String[]{"Burthorpe", "Teleport", "Rub"}, EquipmentSlot.AMULET),
+        new TeleportOption("Combat bracelet", "Warriors' Guild", new String[]{"Warriors' Guild", "Teleport", "Rub"}, EquipmentSlot.HANDS),
+        new TeleportOption("Falador teleport", null, new String[]{"Break"}),
+        new TeleportOption("Taverley teleport", null, new String[]{"Teleport"})
     };
 
     enum MazeRoute {
@@ -365,6 +378,7 @@ public class RoguesDenScript extends AbstractScript {
         long lastProgressTime = System.currentTimeMillis();
         int pathFailures = 0;
         int recoveryAttempts = 0;
+        long lastWorldHopTime = 0L;
 
         while (true) {
             Player currentPlayer = getLocalPlayer();
@@ -383,9 +397,21 @@ public class RoguesDenScript extends AbstractScript {
                 lastProgressTime = System.currentTimeMillis();
             }
 
-            long elapsed = System.currentTimeMillis() - lastProgressTime;
+            long now = System.currentTimeMillis();
+            long elapsed = now - lastProgressTime;
             boolean timeExceeded = elapsed > MAX_TRAVEL_TIME_MS;
             boolean failuresExceeded = pathFailures >= MAX_TRAVEL_PATH_FAILURES;
+
+            if (elapsed > STUCK_MOVEMENT_TIMEOUT_MS && now - lastWorldHopTime > WORLD_HOP_COOLDOWN_MS) {
+                log("Movement stalled for " + elapsed + " ms; attempting world hop.");
+                if (attemptWorldHop()) {
+                    lastWorldHopTime = System.currentTimeMillis();
+                    lastProgressTime = lastWorldHopTime;
+                    pathFailures = 0;
+                    continue;
+                }
+                lastWorldHopTime = System.currentTimeMillis();
+            }
 
             if (timeExceeded || failuresExceeded) {
                 recoveryAttempts++;
@@ -436,16 +462,22 @@ public class RoguesDenScript extends AbstractScript {
 
     private boolean attemptTravelRecovery() {
         log("Initiating travel recovery; attempting to teleport closer to the Rogues' Den.");
-        if (!attemptTeleportToDen()) {
-            log("No valid teleport options available for travel recovery.");
-            return false;
+        if (attemptTeleportToDen()) {
+            Sleep.sleepUntil(() -> {
+                Player player = getLocalPlayer();
+                return player != null && (DEN_AREA.contains(player) || !player.isAnimating());
+            }, 20000);
+            return true;
         }
 
-        Sleep.sleepUntil(() -> {
-            Player player = getLocalPlayer();
-            return player != null && (DEN_AREA.contains(player) || !player.isAnimating());
-        }, 20000);
-        return true;
+        log("No valid teleport options available for travel recovery; preparing fallback.");
+        suppliesReady = false;
+        if (attemptLumbridgeHomeWalk()) {
+            return true;
+        }
+
+        log("Travel recovery failed; no teleports or Home Teleport available.");
+        return false;
     }
 
     private boolean attemptTeleportToDen() {
@@ -460,14 +492,6 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
-        if (getMagic().canCast(Normal.HOME_TELEPORT)) {
-            log("Travel recovery: casting Home Teleport.");
-            if (getMagic().castSpell(Normal.HOME_TELEPORT)) {
-                waitForTeleport();
-                return true;
-            }
-        }
-
         return false;
     }
 
@@ -477,8 +501,8 @@ public class RoguesDenScript extends AbstractScript {
         }
 
         Item inventoryItem = Inventory.get(item -> matchesTeleportOption(item, option));
-        if (inventoryItem != null && useTeleportItem(inventoryItem, option.getDialogueOption(), Tab.INVENTORY)) {
-            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + option.getDialogueOption() + ".");
+        if (inventoryItem != null && useTeleportItem(inventoryItem, option, Tab.INVENTORY)) {
+            log("Travel recovery: used " + inventoryItem.getName() + " to teleport to " + describeTeleportDestination(option) + ".");
             return true;
         }
 
@@ -487,8 +511,8 @@ public class RoguesDenScript extends AbstractScript {
                 continue;
             }
             Item equipped = Equipment.getItemInSlot(slot);
-            if (equipped != null && useTeleportItem(equipped, option.getDialogueOption(), Tab.EQUIPMENT)) {
-                log("Travel recovery: used " + equipped.getName() + " to teleport to " + option.getDialogueOption() + ".");
+            if (equipped != null && useTeleportItem(equipped, option, Tab.EQUIPMENT)) {
+                log("Travel recovery: used " + equipped.getName() + " to teleport to " + describeTeleportDestination(option) + ".");
                 return true;
             }
         }
@@ -496,8 +520,8 @@ public class RoguesDenScript extends AbstractScript {
         return false;
     }
 
-    private boolean useTeleportItem(Item item, String destination, Tab tab) {
-        if (item == null || destination == null) {
+    private boolean useTeleportItem(Item item, TeleportOption option, Tab tab) {
+        if (item == null || option == null) {
             return false;
         }
 
@@ -509,9 +533,27 @@ public class RoguesDenScript extends AbstractScript {
             Sleep.sleepUntil(() -> Tabs.isOpen(tab), 1200);
         }
 
-        if (item.hasAction(destination) && item.interact(destination)) {
-            waitForTeleport();
-            return true;
+        String destination = option.getDialogueOption();
+
+        for (String action : option.getActions()) {
+            if (action == null) {
+                continue;
+            }
+            if (item.hasAction(action) && item.interact(action)) {
+                if ("Rub".equalsIgnoreCase(action) && destination != null) {
+                    if (!Sleep.sleepUntil(Dialogues::areOptionsAvailable, 3000)) {
+                        log("Teleport options did not appear after rubbing " + item.getName() + ".");
+                        return false;
+                    }
+                    if (!Dialogues.chooseOption(destination)) {
+                        log("Failed to choose teleport option \"" + destination + "\" for " + item.getName() + ".");
+                        return false;
+                    }
+                    Sleep.sleepUntil(() -> !Dialogues.inDialogue(), 2000);
+                }
+                waitForTeleport();
+                return true;
+            }
         }
 
         if (item.hasAction("Teleport") && item.interact("Teleport")) {
@@ -519,21 +561,104 @@ public class RoguesDenScript extends AbstractScript {
             return true;
         }
 
-        if (item.hasAction("Rub") && item.interact("Rub")) {
-            if (!Sleep.sleepUntil(Dialogues::areOptionsAvailable, 3000)) {
-                log("Teleport options did not appear after rubbing " + item.getName() + ".");
-                return false;
-            }
-            if (!Dialogues.chooseOption(destination)) {
-                log("Failed to choose teleport option \"" + destination + "\" for " + item.getName() + ".");
-                return false;
-            }
-            Sleep.sleepUntil(() -> !Dialogues.inDialogue(), 2000);
+        if (destination != null && item.hasAction(destination) && item.interact(destination)) {
             waitForTeleport();
             return true;
         }
 
         return false;
+    }
+
+    private boolean attemptLumbridgeHomeWalk() {
+        if (!getMagic().canCast(Normal.HOME_TELEPORT)) {
+            log("Home Teleport unavailable for fallback travel.");
+            return false;
+        }
+
+        log("Casting Home Teleport for emergency walk from Lumbridge.");
+        if (!getMagic().castSpell(Normal.HOME_TELEPORT)) {
+            log("Failed to cast Home Teleport for fallback travel.");
+            return false;
+        }
+
+        waitForTeleport();
+        forceWalkFromLumbridge();
+        return true;
+    }
+
+    private void forceWalkFromLumbridge() {
+        log("Beginning forced walk from Lumbridge toward the Rogues' Den.");
+        Tile lastTile = null;
+        long lastMovement = System.currentTimeMillis();
+        int attempts = 0;
+
+        while (attempts < 12) {
+            Player player = getLocalPlayer();
+            if (player != null && DEN_AREA.contains(player)) {
+                return;
+            }
+
+            if (player != null) {
+                Tile tile = player.getTile();
+                if (tile != null && !tile.equals(lastTile)) {
+                    lastMovement = System.currentTimeMillis();
+                    lastTile = tile;
+                } else if (System.currentTimeMillis() - lastMovement > STUCK_MOVEMENT_TIMEOUT_MS) {
+                    log("Stuck while walking from Lumbridge; attempting a world hop to refresh pathing.");
+                    attemptWorldHop();
+                    lastMovement = System.currentTimeMillis();
+                }
+            }
+
+            if (!getWalking().walk(START_TILE)) {
+                attempts++;
+                Sleep.sleep(600, 900);
+                continue;
+            }
+
+            Sleep.sleepUntil(() -> {
+                Player moving = getLocalPlayer();
+                return moving != null && (DEN_AREA.contains(moving) || moving.isMoving());
+            }, 12000);
+            attempts++;
+        }
+    }
+
+    private boolean attemptWorldHop() {
+        World target = Worlds.getRandomWorld(world -> world != null && world.isMembers() && !world.isPVP());
+        if (target == null) {
+            log("No suitable world found for hop attempt.");
+            return false;
+        }
+
+        int currentWorld = getClient().getCurrentWorld();
+        if (currentWorld == target.getWorld()) {
+            return true;
+        }
+
+        if (!Worlds.hop(target)) {
+            log("Failed to initiate world hop to " + target.getWorld() + ".");
+            return false;
+        }
+
+        boolean hopped = Sleep.sleepUntil(() -> getClient().getCurrentWorld() == target.getWorld(), 12000);
+        if (hopped) {
+            log("World hop successful to " + target.getWorld() + ".");
+        } else {
+            log("World hop timed out while moving to " + target.getWorld() + ".");
+        }
+        return hopped;
+    }
+
+    private String describeTeleportDestination(TeleportOption option) {
+        if (option == null) {
+            return "unknown destination";
+        }
+        String destination = option.getDialogueOption();
+        if (destination != null && !destination.isEmpty()) {
+            return destination;
+        }
+        return option.getKeyword();
     }
 
     private boolean matchesTeleportOption(Item item, TeleportOption option) {
