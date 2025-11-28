@@ -720,20 +720,24 @@ public class RoguesDenScript extends AbstractScript {
         if (Inventory.count(REWARD_CRATE_NAME) < 1) {
             return false;
         }
+
         int attempts = 0;
         while (Inventory.count(REWARD_CRATE_NAME) >= 1 && attempts < 3) {
             NPC npc = NPCs.closest(REWARD_NPC);
             if (npc != null && npc.interact("Claim")) {
                 boolean success = handleRewardDialogue();
                 if (success) {
+                    bankManager.bankRogueRewards();
                     if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
                         && config.stopAfterFullSet
                         && bankManager.hasFullRogueSet()) {
-                        log("Full rogue set obtained. Stopping script.");
+                        log("Full rogue set obtained. Banking rewards and stopping script.");
                         ScriptManager.getScriptManager().stop();
+                        return true;
                     }
-                    bankManager.depositDuplicateRogueGear();
-                    return true;
+
+                    attempts = 0;
+                    continue;
                 } else {
                     log("No gear received, retrying...");
                 }
