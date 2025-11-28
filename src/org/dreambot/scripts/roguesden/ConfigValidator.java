@@ -17,7 +17,8 @@ public final class ConfigValidator {
                                   int breakIntervalMin, int breakIntervalMax,
                                   int breakLengthMin, int breakLengthMax,
                                   int staminaDoseTarget, int staminaDoseThreshold,
-                                  int minimumHealthPercent) {
+                                  int minimumHealthPercent, int foodDoseTarget,
+                                  int flashPowderTarget) {
         if (runThreshold < 0 || runThreshold > 100 ||
             runRestore < 0 || runRestore > 100 ||
             runThreshold >= runRestore) {
@@ -35,6 +36,15 @@ public final class ConfigValidator {
         }
         if (minimumHealthPercent < 0 || minimumHealthPercent > 100) {
             return "Minimum HP percent must be between 0 and 100.";
+        }
+        if (foodDoseTarget < 0) {
+            return "Food quantity must be zero or greater.";
+        }
+        if (minimumHealthPercent > 0 && foodDoseTarget == 0) {
+            return "Please set food quantity to at least 1 when eating is enabled.";
+        }
+        if (flashPowderTarget < 0) {
+            return "Flash powder quantity must be zero or greater.";
         }
         return null;
     }

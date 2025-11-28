@@ -85,6 +85,14 @@ public class RoguesDenGUI extends JFrame {
         foodPanel.add(new JLabel("Preferred food:"));
         JTextField foodField = new JTextField(config.preferredFoodItem == null ? "" : config.preferredFoodItem, 12);
         foodPanel.add(foodField);
+        foodPanel.add(new JLabel("Qty:"));
+        JTextField foodQuantityField = new JTextField(String.valueOf(config.foodDoseTarget), 3);
+        foodPanel.add(foodQuantityField);
+
+        JPanel flashPowderPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        flashPowderPanel.add(new JLabel("Flash powder:"));
+        JTextField flashPowderField = new JTextField(String.valueOf(config.flashPowderTarget), 3);
+        flashPowderPanel.add(flashPowderField);
 
         // Break scheduling controls
         JPanel breakIntervalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -120,7 +128,7 @@ public class RoguesDenGUI extends JFrame {
             int newIdleMin, newIdleMax, threshold, restore;
             int bIntMin, bIntMax, bLenMin, bLenMax;
             int staminaTarget, staminaThreshold;
-            int hpThreshold;
+            int hpThreshold, foodAmount, flashPowderTarget;
             String foodName = foodField.getText().trim();
             try {
                 newIdleMin = Integer.parseInt(idleMin.getText().trim());
@@ -144,10 +152,12 @@ public class RoguesDenGUI extends JFrame {
                 staminaTarget = Integer.parseInt(staminaTargetField.getText().trim());
                 staminaThreshold = Integer.parseInt(staminaThresholdField.getText().trim());
                 hpThreshold = Integer.parseInt(hpThresholdField.getText().trim());
+                foodAmount = Integer.parseInt(foodQuantityField.getText().trim());
+                flashPowderTarget = Integer.parseInt(flashPowderField.getText().trim());
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Run/break/stamina/HP values must be integers.",
+                        "Run/break/stamina/HP/food values must be integers.",
                         "Invalid input",
                         JOptionPane.ERROR_MESSAGE
                 );
@@ -176,7 +186,9 @@ public class RoguesDenGUI extends JFrame {
                     bLenMax,
                     staminaTarget,
                     staminaThreshold,
-                    hpThreshold
+                    hpThreshold,
+                    foodAmount,
+                    flashPowderTarget
             );
             if (error != null) {
                 JOptionPane.showMessageDialog(
@@ -201,6 +213,8 @@ public class RoguesDenGUI extends JFrame {
             config.staminaDoseThreshold = staminaThreshold;
             config.minimumHealthPercent = hpThreshold;
             config.preferredFoodItem = foodName;
+            config.foodDoseTarget = foodAmount;
+            config.flashPowderTarget = flashPowderTarget;
 
             cancelled.set(false);
             done.set(true);
@@ -222,6 +236,7 @@ public class RoguesDenGUI extends JFrame {
         add(routePanel);
         add(hpPanel);
         add(foodPanel);
+        add(flashPowderPanel);
         add(breakIntervalPanel);
         add(breakLengthPanel);
         add(start);
