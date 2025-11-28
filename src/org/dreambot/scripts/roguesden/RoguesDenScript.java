@@ -983,6 +983,40 @@ public class RoguesDenScript extends AbstractScript {
             }
         }
 
+        enum AntiBanIntensity {
+            MINIMAL("Minimal", 0.35, 0.6, false),
+            STANDARD("Standard", 1.0, 1.0, true);
+
+            private final String displayName;
+            private final double chanceScale;
+            private final double reactionScale;
+            private final boolean allowEntityActions;
+
+            AntiBanIntensity(String displayName, double chanceScale, double reactionScale, boolean allowEntityActions) {
+                this.displayName = displayName;
+                this.chanceScale = chanceScale;
+                this.reactionScale = reactionScale;
+                this.allowEntityActions = allowEntityActions;
+            }
+
+            public double getChanceScale() {
+                return chanceScale;
+            }
+
+            public double getReactionScale() {
+                return reactionScale;
+            }
+
+            public boolean shouldPerformEntityAction() {
+                return allowEntityActions;
+            }
+
+            @Override
+            public String toString() {
+                return displayName;
+            }
+        }
+
         /**
          * Whether to drink stamina potions to restore run energy.
          * True enables potion usage, false avoids it.
@@ -1006,6 +1040,11 @@ public class RoguesDenScript extends AbstractScript {
          * True to enable, false to disable.
          */
         boolean antiban = true;
+
+        /**
+         * Controls the aggressiveness of anti-ban actions and reaction sleeps.
+         */
+        AntiBanIntensity antibanIntensity = AntiBanIntensity.STANDARD;
 
         /**
          * Hover the next maze entity before interacting for anti-ban realism.

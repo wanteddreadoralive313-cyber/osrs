@@ -1,10 +1,12 @@
 package org.dreambot.scripts.roguesden;
 
+import org.dreambot.api.methods.dialogues.Dialogues;
 import org.dreambot.api.methods.tabs.Tab;
 import org.dreambot.api.methods.tabs.Tabs;
 import org.dreambot.api.script.AbstractScript;
 import org.dreambot.api.input.Mouse;
 import org.dreambot.api.utilities.impl.ABCUtil;
+import org.dreambot.api.wrappers.interactive.Player;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +44,7 @@ class AntiBanTest {
         cfg.breakIntervalMax = 1;
         cfg.breakLengthMin = 1;
         cfg.breakLengthMax = 1;
+        cfg.antibanIntensity = RoguesDenScript.Config.AntiBanIntensity.STANDARD;
         return cfg;
     }
 
@@ -62,6 +65,18 @@ class AntiBanTest {
         when(mouse.getPosition()).thenReturn(new Point(0, 0));
         when(script.getMouse()).thenReturn(mouse);
         doNothing().when(script).log(anyString());
+        return script;
+    }
+
+    private AbstractScript mockLongWaitScript() {
+        AbstractScript script = mockScript();
+        Player movingPlayer = mock(Player.class);
+        when(movingPlayer.isMoving()).thenReturn(true);
+        when(script.getLocalPlayer()).thenReturn(movingPlayer);
+
+        Dialogues dialogues = mock(Dialogues.class);
+        when(dialogues.inDialogue()).thenReturn(true);
+        when(script.getDialogues()).thenReturn(dialogues);
         return script;
     }
 
@@ -254,7 +269,7 @@ class AntiBanTest {
 
         ABCUtil abc = mock(ABCUtil.class);
 
-        AntiBan.sleepReaction(abc, cfg);
+        AntiBan.sleepReaction(mockScript(), abc, cfg);
 
         verify(abc, never()).generateReactionTime();
     }
@@ -267,9 +282,21 @@ class AntiBanTest {
         ABCUtil abc = mock(ABCUtil.class);
         when(abc.generateReactionTime()).thenReturn(0);
 
-        AntiBan.sleepReaction(abc, cfg);
+        AntiBan.sleepReaction(mockScript(), abc, cfg);
 
         verify(abc).generateReactionTime();
+    }
+
+    @Test
+    void sleepReactionSkipsDuringLongWaitStates() {
+        RoguesDenScript.Config cfg = baseConfig();
+        cfg.antiban = true;
+
+        ABCUtil abc = mock(ABCUtil.class);
+
+        AntiBan.sleepReaction(mockLongWaitScript(), abc, cfg);
+
+        verify(abc, never()).generateReactionTime();
     }
 }
 
