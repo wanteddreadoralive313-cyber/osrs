@@ -23,6 +23,7 @@ public class BankManager {
     private final RoguesDenScript.Config config;
     private final String[] gearItems;
     private final String rewardCrateName;
+    private final String flashPowderName;
     private final int bankInteractionRange;
     private final int staminaDosesPerPotion;
 
@@ -33,12 +34,14 @@ public class BankManager {
                        RoguesDenScript.Config config,
                        String[] gearItems,
                        String rewardCrateName,
+                       String flashPowderName,
                        int bankInteractionRange,
                        int staminaDosesPerPotion) {
         this.script = Objects.requireNonNull(script, "script");
         this.config = Objects.requireNonNull(config, "config");
         this.gearItems = Arrays.copyOf(gearItems, gearItems.length);
         this.rewardCrateName = Objects.requireNonNull(rewardCrateName, "rewardCrateName");
+        this.flashPowderName = Objects.requireNonNull(flashPowderName, "flashPowderName");
         this.bankInteractionRange = bankInteractionRange;
         this.staminaDosesPerPotion = staminaDosesPerPotion;
     }
@@ -47,6 +50,8 @@ public class BankManager {
         if (suppliesReady) {
             return true;
         }
+
+        clearCoinPouches();
 
         boolean bankOpened = false;
 
@@ -86,7 +91,7 @@ public class BankManager {
         }
 
         if (config.useStamina) {
-            int currentDoses = getStaminaDoseCount();
+            int currentDoses = getCarriedStaminaDoseCount();
             int potionsNeeded = getRequiredStaminaPotions(currentDoses);
             if (potionsNeeded > 0) {
                 if (!bankOpened && !ensureBankOpen("withdraw stamina potions")) {
@@ -101,7 +106,8 @@ public class BankManager {
         }
 
         String foodName = getConfiguredFoodName();
-        if (!foodName.isEmpty() && !Inventory.contains(foodName)) {
+        int foodTarget = Math.max(0, config.foodDoseTarget);
+        if (!foodName.isEmpty() && foodTarget > 0 && Inventory.count(foodName) < foodTarget) {
             if (!bankOpened && !ensureBankOpen("withdraw " + foodName)) {
                 return false;
             }
@@ -111,9 +117,27 @@ public class BankManager {
                 closeBank();
                 return false;
             }
-            script.getBank().withdraw(foodName, 1);
-            if (!Sleep.sleepUntil(() -> Inventory.contains(foodName), 2000)) {
+            int missing = foodTarget - Inventory.count(foodName);
+            if (!withdrawWithConfirmation(foodName, missing)) {
                 script.log("Failed to withdraw preferred food item " + foodName + ".");
+                closeBank();
+                return false;
+            }
+        }
+
+        if (config.flashPowderTarget > 0 && Inventory.count(flashPowderName) < config.flashPowderTarget) {
+            if (!bankOpened && !ensureBankOpen("withdraw flash powder")) {
+                return false;
+            }
+            bankOpened = true;
+            if (!script.getBank().contains(flashPowderName)) {
+                script.log("Missing flash powder to restock.");
+                closeBank();
+                return false;
+            }
+            int missing = config.flashPowderTarget - Inventory.count(flashPowderName);
+            if (!withdrawWithConfirmation(flashPowderName, missing)) {
+                script.log("Failed to withdraw flash powder.");
                 closeBank();
                 return false;
             }
@@ -152,6 +176,33 @@ public class BankManager {
             script.log("Supply verification failed, will retry.");
         }
         return ready;
+    }
+
+    private void clearCoinPouches() {
+        int attempts = 0;
+        while (Inventory.contains("Coin pouch") && attempts < 5) {
+            Item pouch = Inventory.get("Coin pouch");
+            if (pouch == null) {
+                break;
+            }
+            if (!pouch.interact("Open-all") && !pouch.interact("Open")) {
+                break;
+            }
+            Sleep.sleep(200, 400);
+            Sleep.sleepUntil(() -> !Inventory.contains("Coin pouch"), 1200);
+            attempts++;
+        }
+    }
+
+    private boolean withdrawWithConfirmation(String itemName, int quantity) {
+        if (quantity <= 0) {
+            return true;
+        }
+        int before = Inventory.count(itemName);
+        if (!script.getBank().withdraw(itemName, quantity)) {
+            return false;
+        }
+        return Sleep.sleepUntil(() -> Inventory.count(itemName) >= before + quantity, 2000);
     }
 
     public boolean ensureBankOpen(String context) {
@@ -341,7 +392,10 @@ public class BankManager {
         if (!hasFullRogueSetEquipped()) {
             return false;
         }
-        if (config.useStamina && shouldRestockStamina(getStaminaDoseCount())) {
+        if (config.useStamina && shouldRestockStamina(getCarriedStaminaDoseCount())) {
+            return false;
+        }
+        if (config.flashPowderTarget > 0 && Inventory.count(flashPowderName) < config.flashPowderTarget) {
             return false;
         }
         return !needsFoodRestock();
@@ -362,7 +416,8 @@ public class BankManager {
 
     private boolean needsFoodRestock() {
         String foodName = getConfiguredFoodName();
-        return !foodName.isEmpty() && !Inventory.contains(foodName);
+        int foodTarget = Math.max(0, config.foodDoseTarget);
+        return !foodName.isEmpty() && foodTarget > 0 && Inventory.count(foodName) < 1;
     }
 
     private String getConfiguredFoodName() {
@@ -379,8 +434,34 @@ public class BankManager {
     }
 
     public int getStaminaDoseCount() {
+        int total = getCarriedStaminaDoseCount();
+        if (script.getBank() != null && script.getBank().isOpen()) {
+            total += getBankStaminaDoseCount();
+        }
+        return total;
+    }
+
+    private int getCarriedStaminaDoseCount() {
         int total = 0;
         for (Item item : Inventory.all()) {
+            if (!isStaminaPotion(item)) {
+                continue;
+            }
+            total += getStaminaDoses(item);
+        }
+        return total;
+    }
+
+    private int getBankStaminaDoseCount() {
+        if (script.getBank() == null) {
+            return 0;
+        }
+        int total = 0;
+        Item[] bankItems = script.getBank().getItems();
+        if (bankItems == null) {
+            return 0;
+        }
+        for (Item item : bankItems) {
             if (!isStaminaPotion(item)) {
                 continue;
             }
@@ -420,9 +501,9 @@ public class BankManager {
                 script.log("Insufficient stamina potions remaining in bank to reach configured target.");
                 break;
             }
-            int before = getStaminaDoseCount();
+            int before = getCarriedStaminaDoseCount();
             script.getBank().withdraw(this::isStaminaPotion, 1);
-            if (!Sleep.sleepUntil(() -> getStaminaDoseCount() > before, 2000)) {
+            if (!Sleep.sleepUntil(() -> getCarriedStaminaDoseCount() > before, 2000)) {
                 script.log("Failed to confirm stamina potion withdrawal.");
                 return false;
             }

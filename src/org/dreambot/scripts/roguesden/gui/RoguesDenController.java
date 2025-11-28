@@ -58,7 +58,9 @@ public class RoguesDenController {
             config.breakLengthMax,
             config.staminaDoseTarget,
             config.staminaDoseThreshold,
-            config.minimumHealthPercent
+            config.minimumHealthPercent,
+            config.foodDoseTarget,
+            config.flashPowderTarget
         );
 
         if (error != null) {

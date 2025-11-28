@@ -151,6 +151,7 @@ public class RoguesDenScript extends AbstractScript {
             config,
             GEAR_ITEMS,
             REWARD_CRATE_NAME,
+            FLASH_POWDER_NAME,
             BANK_INTERACTION_RANGE,
             STAMINA_DOSES_PER_POTION
         );
@@ -895,6 +896,19 @@ public class RoguesDenScript extends AbstractScript {
          * Preferred food item name to withdraw and eat when {@link #minimumHealthPercent} is breached.
          */
         String preferredFoodItem = "";
+
+        /**
+         * Number of food items to withdraw when restocking.
+         * Must be non-negative. When {@link #minimumHealthPercent} is greater than zero,
+         * this must be at least 1 so the script has food to eat.
+         */
+        int foodDoseTarget = 3;
+
+        /**
+         * Number of flash powders to keep in inventory before starting a maze run.
+         * Must be non-negative.
+         */
+        int flashPowderTarget = 1;
 
         /**
          * Minimum minutes between extended breaks.
