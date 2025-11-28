@@ -703,10 +703,11 @@ public class RoguesDenScript extends AbstractScript {
     }
 
     private boolean handleRewards(boolean retriedAfterDelay) {
+        if (!bankManager.hasRewardsToBank()) {
+            return false;
+        }
+
         if (config.rewardTarget == Config.RewardTarget.KEEP_CRATES) {
-            if (Inventory.count(REWARD_CRATE_NAME) < 1) {
-                return false;
-            }
             boolean stored = bankManager.clearRewardCrates();
             if (stored) {
                 mazeRunner.resetProgress();
@@ -717,33 +718,27 @@ public class RoguesDenScript extends AbstractScript {
             return true;
         }
 
-        if (Inventory.count(REWARD_CRATE_NAME) < 1) {
-            return false;
-        }
+        boolean rewardClaimed = false;
         int attempts = 0;
-        while (Inventory.count(REWARD_CRATE_NAME) >= 1 && attempts < 3) {
+        int crateCount = Inventory.count(REWARD_CRATE_NAME);
+        while (crateCount >= 1 && attempts < 3) {
             NPC npc = NPCs.closest(REWARD_NPC);
             if (npc != null && npc.interact("Claim")) {
                 boolean success = handleRewardDialogue();
                 if (success) {
-                    if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
-                        && config.stopAfterFullSet
-                        && bankManager.hasFullRogueSet()) {
-                        log("Full rogue set obtained. Stopping script.");
-                        ScriptManager.getScriptManager().stop();
-                    }
-                    bankManager.depositDuplicateRogueGear();
-                    return true;
-                } else {
-                    log("No gear received, retrying...");
+                    rewardClaimed = true;
+                    break;
                 }
+                log("No gear received, retrying...");
             } else {
                 log("Failed to locate reward NPC.");
             }
             attempts++;
             Sleep.sleep(600, 1200);
+            crateCount = Inventory.count(REWARD_CRATE_NAME);
         }
-        if (Inventory.count(REWARD_CRATE_NAME) >= 1) {
+
+        if (Inventory.count(REWARD_CRATE_NAME) >= 1 && !rewardClaimed) {
             log("Failed to obtain gear after multiple attempts.");
             boolean cratesCleared = bankManager.clearRewardCrates();
             if (cratesCleared) {
@@ -758,7 +753,25 @@ public class RoguesDenScript extends AbstractScript {
                 Sleep.sleep(600, 900);
             }
         }
-        return true;
+
+        boolean bankedRewards = bankManager.bankRewards();
+        if (bankedRewards) {
+            mazeRunner.resetProgress();
+        } else {
+            log("Unable to bank rewards; will retry later.");
+        }
+
+        if (config.rewardTarget == Config.RewardTarget.ROGUE_EQUIPMENT
+            && config.stopAfterFullSet
+            && bankManager.hasFullRogueSet()) {
+            if (bankedRewards || bankManager.bankRewards()) {
+                stopScriptWithMessage("Full rogue set obtained and banked. Stopping script.");
+            } else {
+                log("Full rogue set complete but could not bank before stopping; will retry banking.");
+            }
+        }
+
+        return rewardClaimed || bankedRewards;
     }
 
     protected boolean handleRewardDialogue() {
