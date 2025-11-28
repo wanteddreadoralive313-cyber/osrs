@@ -22,6 +22,8 @@ import org.dreambot.api.wrappers.interactive.NPC;
 import org.dreambot.api.wrappers.interactive.Player;
 import org.dreambot.api.wrappers.items.Item;
 import org.dreambot.scripts.roguesden.bank.BankManager;
+import org.dreambot.scripts.roguesden.ConfigProfileManager.LoadResult;
+import org.dreambot.scripts.roguesden.ConfigProfileManager.Source;
 import org.dreambot.scripts.roguesden.gui.RoguesDenController;
 import org.dreambot.scripts.roguesden.maze.MazeRunner;
 
@@ -102,6 +104,7 @@ public class RoguesDenScript extends AbstractScript {
     private BankManager bankManager;
     private MazeRunner mazeRunner;
     private RoguesDenController controller;
+    private ConfigProfileManager configProfileManager;
 
     private enum State { TRAVEL, MAZE, REST }
 
@@ -184,6 +187,12 @@ public class RoguesDenScript extends AbstractScript {
 
         // Initialize ABC2 reaction-time trackers once at script start
         abc.generateTrackers();
+        configProfileManager = new ConfigProfileManager(null, this::log);
+        LoadResult loadResult = configProfileManager.loadConfig(ironman);
+        if (applyConfiguration(loadResult.getConfig(), loadResult.getSource().describe(ironman))) {
+            configProfileManager.saveConfig(config);
+            return;
+        }
 
         controller = new RoguesDenController(config);
         RoguesDenScript.Config selectedConfig;
@@ -201,9 +210,12 @@ public class RoguesDenScript extends AbstractScript {
             return;
         }
 
-        config = selectedConfig;
-        initializeManagers();
-        suppliesReady = false;
+        if (!applyConfiguration(selectedConfig, "GUI configuration")) {
+            ScriptManager.getScriptManager().stop();
+            return;
+        }
+
+        configProfileManager.saveConfig(config);
     }
 
     private boolean meetsRequirements() {
@@ -744,6 +756,39 @@ public class RoguesDenScript extends AbstractScript {
 
     private boolean isFoodConfigured() {
         return !getConfiguredFoodName().isEmpty();
+    }
+
+    private boolean applyConfiguration(RoguesDenScript.Config candidate, String sourceDescription) {
+        String validationError = validateConfiguration(candidate);
+        if (validationError != null) {
+            log("Invalid " + sourceDescription + ": " + validationError);
+            return false;
+        }
+
+        config = ensureConfig(candidate);
+        initializeManagers();
+        suppliesReady = false;
+        log("Loaded " + sourceDescription + ".");
+        return true;
+    }
+
+    private String validateConfiguration(RoguesDenScript.Config candidate) {
+        if (candidate == null) {
+            return "Configuration is missing.";
+        }
+        return ConfigValidator.validate(
+            candidate.idleMin,
+            candidate.idleMax,
+            candidate.runThreshold,
+            candidate.runRestore,
+            candidate.breakIntervalMin,
+            candidate.breakIntervalMax,
+            candidate.breakLengthMin,
+            candidate.breakLengthMax,
+            candidate.staminaDoseTarget,
+            candidate.staminaDoseThreshold,
+            candidate.minimumHealthPercent
+        );
     }
 
     private String getConfiguredFoodName() {
