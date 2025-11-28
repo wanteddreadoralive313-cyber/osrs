@@ -204,7 +204,7 @@ public class MazeRunner {
             lastSafeTile = player.getTile();
         }
         failureCount = 0;
-        AntiBan.sleepReaction(abc, config);
+        AntiBan.sleepReaction(script, abc, config);
     }
 
     private void instructionFailed(String label, String reason) {

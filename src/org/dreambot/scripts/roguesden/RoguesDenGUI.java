@@ -27,6 +27,12 @@ public class RoguesDenGUI extends JFrame {
         // Common checkboxes
         JCheckBox stamina = new JCheckBox("Use stamina potions", config.useStamina);
         JCheckBox antiban = new JCheckBox("Enable anti-ban", config.antiban);
+        JPanel antibanIntensityPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        antibanIntensityPanel.add(new JLabel("Anti-ban intensity:"));
+        JComboBox<RoguesDenScript.Config.AntiBanIntensity> antibanIntensity =
+            new JComboBox<>(RoguesDenScript.Config.AntiBanIntensity.values());
+        antibanIntensity.setSelectedItem(config.antibanIntensity);
+        antibanIntensityPanel.add(antibanIntensity);
 
         JPanel staminaPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         staminaPanel.add(new JLabel("Stamina doses carry:"));
@@ -109,6 +115,7 @@ public class RoguesDenGUI extends JFrame {
             // Persist toggles
             config.useStamina = stamina.isSelected();
             config.antiban = antiban.isSelected();
+            config.antibanIntensity = (RoguesDenScript.Config.AntiBanIntensity) antibanIntensity.getSelectedItem();
             config.hoverEntities = hover.isSelected();
             config.randomRightClick = rightClick.isSelected();
             config.cameraPanning = camera.isSelected();
@@ -211,6 +218,7 @@ public class RoguesDenGUI extends JFrame {
         add(stamina);
         add(staminaPanel);
         add(antiban);
+        add(antibanIntensityPanel);
         add(hover);
         add(rightClick);
         add(camera);
