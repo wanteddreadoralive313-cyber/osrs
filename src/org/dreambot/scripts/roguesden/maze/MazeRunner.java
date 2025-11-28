@@ -108,12 +108,18 @@ public class MazeRunner {
     }
 
     public void handleMaze(Player player) {
-        if (player != null && player.distance(startTile) <= 1 && step > 0) {
-            recoverMaze();
+        if (player == null) {
             return;
         }
 
         ensureActiveMazeRouteSelected();
+
+        String recoveryReason = determineRecoveryReason(player);
+        if (recoveryReason != null) {
+            recoverMaze(recoveryReason);
+            return;
+        }
+
         List<MazeInstruction> path = getActiveMazePath();
 
         if (step >= path.size()) {
@@ -316,7 +322,7 @@ public class MazeRunner {
         if (Inventory.isFull() && needsPickup) {
             if (!ensureInventorySpaceForGroundItem(targetName)) {
                 script.log("Inventory full and no safe item to drop for " + targetName + ". Aborting maze run.");
-                recoverMaze();
+                recoverMaze("unable to free inventory space for " + targetName);
                 return;
             }
         }
@@ -333,7 +339,7 @@ public class MazeRunner {
 
         if (Inventory.isFull()) {
             script.log("Inventory still full before taking " + instruction.data + ". Aborting maze run.");
-            recoverMaze();
+            recoverMaze("inventory remained full before taking " + instruction.data);
             return;
         }
 
@@ -569,14 +575,122 @@ public class MazeRunner {
         resetProgress();
     }
 
-    private void recoverMaze() {
-        script.log("Recovering maze...");
+    private String determineRecoveryReason(Player player) {
+        if (step <= 0) {
+            return null;
+        }
+
+        if (isAtTile(player, startTile)) {
+            return "player respawned at maze start";
+        }
+
+        if (!isOnActiveRoute(player)) {
+            return "player teleported off maze path";
+        }
+
+        if (step > getActiveMazePath().size()) {
+            return "maze step exceeded route length";
+        }
+
+        return null;
+    }
+
+    private boolean isOnActiveRoute(Player player) {
+        if (player == null || player.getTile() == null) {
+            return false;
+        }
+
+        if (isAtTile(player, startTile) || isAtTile(player, chestTile)) {
+            return true;
+        }
+
+        return findClosestInstructionIndex(player.getTile()) >= 0;
+    }
+
+    private void recoverMaze(String reason) {
+        script.log("Recovering maze (" + reason + ")...");
+
+        walkToStart();
+        synchronizeStepWithPosition();
+        failureCount = 0;
+        lastSafeTile = startTile;
+    }
+
+    private void walkToStart() {
+        Player current = script.getLocalPlayer();
+        if (isAtTile(current, startTile)) {
+            return;
+        }
+
         script.getWalking().walk(startTile);
         Sleep.sleepUntil(() -> {
             Player player = script.getLocalPlayer();
             return player != null && player.distance(startTile) <= 2;
-        }, 6000);
-        resetProgress();
+        }, 8000);
+    }
+
+    private void synchronizeStepWithPosition() {
+        ensureActiveMazeRouteSelected();
+
+        Player player = script.getLocalPlayer();
+        if (player == null || player.getTile() == null) {
+            resetProgress();
+            return;
+        }
+
+        int previousStep = step;
+        step = determineStepForTile(player.getTile());
+
+        if (step != previousStep) {
+            script.log("Maze step synchronized to " + step + " based on current position.");
+        }
+    }
+
+    private int determineStepForTile(Tile playerTile) {
+        if (playerTile == null) {
+            return 0;
+        }
+
+        if (playerTile.distance(chestTile) <= 1) {
+            return getActiveMazePath().size();
+        }
+
+        if (playerTile.distance(startTile) <= 1) {
+            return 0;
+        }
+
+        int index = findClosestInstructionIndex(playerTile);
+        if (index < 0) {
+            return 0;
+        }
+
+        MazeInstruction instruction = getActiveMazePath().get(index);
+        if (instruction.type == InstructionType.MOVE && playerTile.equals(instruction.tile)) {
+            return index + 1;
+        }
+
+        return index;
+    }
+
+    private int findClosestInstructionIndex(Tile playerTile) {
+        List<MazeInstruction> path = getActiveMazePath();
+        int closestIndex = -1;
+        double closestDistance = Double.MAX_VALUE;
+
+        for (int i = 0; i < path.size(); i++) {
+            MazeInstruction instruction = path.get(i);
+            if (instruction.tile == null) {
+                continue;
+            }
+
+            double distance = playerTile.distance(instruction.tile);
+            if (distance <= 2 && distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = i;
+            }
+        }
+
+        return closestIndex;
     }
 
     private boolean ensureInventorySpaceForGroundItem(String targetName) {
