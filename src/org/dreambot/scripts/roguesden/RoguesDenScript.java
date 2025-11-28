@@ -766,6 +766,10 @@ public class RoguesDenScript extends AbstractScript {
         return mazeRunner.getInstructionLabel(route, index);
     }
 
+    MazeRoute determineMazeRouteForLevel(int thievingLevel) {
+        return mazeRunner.determineMazeRouteForLevel(thievingLevel);
+    }
+
     void incrementStep() {
         mazeRunner.incrementStep();
     }
